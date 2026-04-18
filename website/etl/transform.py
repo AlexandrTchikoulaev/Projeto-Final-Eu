@@ -121,9 +121,7 @@ def funcao_imf_values(data):
     return pd.DataFrame(lista)
 
 
-# ===============================
-# Obter last_run
-# ===============================
+# Obter tempo  da última execução
 cur.execute("""
 SELECT last_run
 FROM etl_data
@@ -132,9 +130,7 @@ WHERE process_name = 'etl_main';
 
 last_run = cur.fetchone()[0]
 
-# ===============================
-# Mapping incremental
-# ===============================
+# Mapeamento de ficheiros e funções
 cur.execute("""
 SELECT file_name, extract_function
 FROM op_data
@@ -146,11 +142,11 @@ mapping_funcoes = {
     for file_name, extract_function in cur.fetchall()
 }
 
-# ===============================
-# Pipeline de transformação
-# ===============================
+# Transformação de Ficheiros
+
 def transformar():
 
+    # Verificação de existência de novos ficheiros
     if not mapping_funcoes:
         print("Sem novos ficheiros para transformar.")
         return
@@ -159,6 +155,7 @@ def transformar():
 
         print(f"A processar: {ficheiro}")
 
+        # Verificação da existência da função
         if nome_funcao not in globals():
             print(f"Função não existe: {nome_funcao}")
             log_etl(ficheiro, 'transform', 'error', f"Função não existe: {nome_funcao}")
@@ -166,6 +163,7 @@ def transformar():
 
         funcao_extracao = globals()[nome_funcao]
 
+        # Tentativa de leitura do ficheiro bruto do bucket Raw do MinIO
         try:
             response = s3.get_object(Bucket="raw", Key=ficheiro)
             dados = json.load(response['Body'])
@@ -174,25 +172,30 @@ def transformar():
             log_etl(ficheiro, 'transform', 'error', str(e))
             continue
 
+        # Transformação do ficheiro bruto pela respetiva função de transformação
         df = funcao_extracao(dados)
 
         if df is None or df.empty:
             print(f"DataFrame vazio: {ficheiro}")
-            log_etl(ficheiro, 'transform', 'error', "DataFrame vazio")
+            log_etl(ficheiro, 'transform', 'error', "Função retorna DataFrame vazio")
             continue
 
+        # Conversão do dataframe para formato parquet
         buffer = io.BytesIO()
         df.to_parquet(buffer, index=False)
         buffer.seek(0)
 
+        # Criação do nome de armazenamento no bucket transformed
         nome_parquet = ficheiro.rsplit(".", 1)[0] + ".parquet"
 
+        # Armazenamento do ficheiro transformado no bucket transformed
         s3.put_object(
             Bucket="transformed",
             Key=nome_parquet,
             Body=buffer
         )
 
+        # Mensagem de confirmação
         print(f"Transformado: {ficheiro} -> {nome_parquet}")
 
 

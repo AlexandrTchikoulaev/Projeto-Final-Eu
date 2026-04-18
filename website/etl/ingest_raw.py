@@ -25,7 +25,7 @@ def main():
 
     cur = conn.cursor()
 
-    # ── 1. Obter last_run ────────────────────────────────────────────────────
+    # 1. Obter last_run 
     cur.execute("""
         SELECT last_run
         FROM etl_data
@@ -33,7 +33,7 @@ def main():
     """)
     last_run = cur.fetchone()[0]
 
-    # ── 2. Buscar apenas novos registos desde last_run ───────────────────────
+    # 2. Buscar apenas novos registos desde last_run
     cur.execute("""
         SELECT file_id, file_name, file_url, file_type
         FROM op_data
@@ -46,6 +46,7 @@ def main():
     
     # ── 3. Processar cada ficheiro ───────────────────────────────────────────
     for file_id, file_name, file_url, file_type in rows:
+
         try:
             response = session.get(file_url, timeout=30)
             response.raise_for_status()
@@ -60,13 +61,7 @@ def main():
                     "source_url": file_url
                 }
             )
-
-            cur.execute("""
-                INSERT INTO etl_logs (file_name, step, status, error_message)
-                VALUES (%s, %s, %s, %s)
-            """, (file_name, 'ingest_raw', 'success', None))
-
-            print(f"[OK]    {file_name}")
+            print(f"[SUCESSO]  Inserido no bucket Raw   {file_name}")
 
         except Exception as e:
             cur.execute("""
@@ -74,7 +69,7 @@ def main():
                 VALUES (%s, %s, %s, %s, %s)
             """, (file_id, file_name, 'ingest_raw', 'error', str(e)))
 
-            print(f"[ERRO]  {file_name} → {e}")
+            print(f"[ERRO] {e} → {file_name}")
 
     conn.commit()
     cur.close()
