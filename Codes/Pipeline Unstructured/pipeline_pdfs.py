@@ -1,8 +1,10 @@
 """
 Orquestrador do pipeline de dados não estruturados (PDFs).
 Executa sequencialmente:
-  1. ingest_unstructured — descarrega PDFs para o bucket unstructured
-  2. ingest_vectorialdb  — processa PDFs e indexa embeddings na BD vetorial
+  1. validate_op_report        — valida registos em op_report antes de ingerir
+  2. bronze                    — descarrega PDFs para o bucket bronze-unstructured
+  3. validate_bronze_unstructured — valida PDFs no bucket bronze-unstructured
+  4. silver                    — processa PDFs e indexa embeddings na BD vetorial
 """
 import sys
 import os
@@ -48,18 +50,42 @@ def run_step(label: str, fn):
         raise
 
 
+def get_prev_last_run():
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+        cur = conn.cursor()
+        cur.execute("SELECT last_run FROM etl_data WHERE process_name = %s", (PROCESS_NAME,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return row[0] if row else None
+    except Exception:
+        return None
+
+
 def run_pipeline():
-    import ingest_unstructured
-    import ingest_vectorialdb
+    import validate_op_report
+    import bronze
+    import validate_bronze_unstructured
+    import silver
+
+    run_start     = datetime.now()
+    prev_last_run = get_prev_last_run()
 
     print("\n PIPELINE DE PDFs INICIADO")
-    print(f" {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+    print(f" {run_start.strftime('%Y-%m-%d %H:%M:%S')}\n")
 
-    # 1. Descarregar PDFs para MinIO
-    run_step("1/2 — ingest_unstructured", ingest_unstructured.main)
+    # 1. Validar op_report antes de ingerir
+    run_step("1/4 — validate_op_report", validate_op_report.validate)
 
-    # 2. Indexar embeddings na BD vetorial
-    run_step("2/2 — ingest_vectorialdb", ingest_vectorialdb.main)
+    # 2. Descarregar PDFs para bronze-unstructured
+    run_step("2/4 — bronze", bronze.main)
+
+    # 3. Validar PDFs no bucket bronze-unstructured
+    run_step("3/4 — validate_bronze_unstructured", validate_bronze_unstructured.validate)
+
+    # 4. Indexar embeddings na BD vetorial
+    run_step("4/4 — silver", silver.main)
 
     # Atualizar timestamp
     update_timestamp()

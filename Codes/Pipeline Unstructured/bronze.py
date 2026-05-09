@@ -33,7 +33,7 @@ def is_valid_pdf(content: bytes) -> bool:
 
 
 def main():
-    print("A correr ingest_unstructured...")
+    print("A correr bronze (ingest unstructured)...")
 
     conn_pipe = psycopg2.connect(**DB_PIPELINE)
     cur_pipe  = conn_pipe.cursor()
@@ -41,18 +41,15 @@ def main():
     cur_op    = conn_op.cursor()
     s3 = boto3.client("s3", **MINIO_CONFIG)
 
-    # Garantir que o bucket existe
     try:
         s3.head_bucket(Bucket=BUCKET_UNSTRUCTURED)
     except Exception:
         s3.create_bucket(Bucket=BUCKET_UNSTRUCTURED)
 
-    # Obter last_run do processo de PDFs
     cur_pipe.execute("SELECT last_run FROM etl_data WHERE process_name = %s", (PROCESS_NAME,))
     row = cur_pipe.fetchone()
     last_run = row[0] if row else None
 
-    # Buscar novos relatórios desde last_run
     if last_run:
         cur_op.execute("""
             SELECT report_id, file_name, report_url
@@ -105,14 +102,14 @@ def main():
             cur_pipe.execute("""
                 INSERT INTO etl_logs_pdfs (file_name, step, status, error_message)
                 VALUES (%s, %s, %s, %s)
-            """, (file_name, "ingest_unstructured", "error", str(e)))
+            """, (file_name, "bronze", "error", str(e)))
             print(f"[ERRO] {file_name}: {e}")
             err_count += 1
 
     conn_pipe.commit()
     cur_pipe.close(); conn_pipe.close()
     cur_op.close();   conn_op.close()
-    print(f"ingest_unstructured concluído — {ok_count} OK, {err_count} erros")
+    print(f"bronze concluído — {ok_count} OK, {err_count} erros")
 
 
 if __name__ == "__main__":

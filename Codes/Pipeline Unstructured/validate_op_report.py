@@ -1,0 +1,92 @@
+"""
+Valida os registos de op_report antes da ingestão para a camada Bronze.
+Verifica report_url, file_name e existência do relatório.
+Retorna (valid_ids, invalid_ids).
+Regista erros em etl_logs_pdfs.
+"""
+import psycopg2
+
+DB_PIPELINE = {
+    "host": "localhost",
+    "port": 5433,
+    "dbname": "pipeline_db",
+    "user": "projeto_utilizador",
+    "password": "projeto",
+}
+
+DB_OPERATIONAL = {
+    "host": "localhost",
+    "port": 5433,
+    "dbname": "operational_db",
+    "user": "projeto_utilizador",
+    "password": "projeto",
+}
+
+PROCESS_NAME = "etl_pdfs"
+
+
+def validate(last_run=None):
+    conn_pipe = psycopg2.connect(**DB_PIPELINE)
+    cur_pipe  = conn_pipe.cursor()
+    conn_op   = psycopg2.connect(**DB_OPERATIONAL)
+    cur_op    = conn_op.cursor()
+
+    if last_run is None:
+        cur_pipe.execute("SELECT last_run FROM etl_data WHERE process_name = %s", (PROCESS_NAME,))
+        row = cur_pipe.fetchone()
+        last_run = row[0] if row else None
+
+    if last_run:
+        cur_op.execute("""
+            SELECT report_id, file_name, report_url, created_at
+            FROM op_report
+            WHERE created_at > %s
+        """, (last_run,))
+    else:
+        cur_op.execute("""
+            SELECT report_id, file_name, report_url, created_at
+            FROM op_report
+        """)
+
+    rows = cur_op.fetchall()
+
+    valid_ids = []
+    invalid_ids = []
+
+    for report_id, file_name, report_url, created_at in rows:
+        errors = []
+
+        if not created_at:
+            errors.append("Campo created_at em falta")
+
+        if not file_name:
+            errors.append("file_name está vazio ou nulo")
+        elif not file_name.lower().endswith(".pdf"):
+            errors.append(f"file_name não tem extensão .pdf: {file_name}")
+
+        if not report_url:
+            errors.append("report_url está vazio ou nulo")
+        elif not report_url.startswith("http"):
+            errors.append(f"report_url inválido (não começa com http): {report_url}")
+
+        if errors:
+            msg = "; ".join(errors)
+            cur_pipe.execute("""
+                INSERT INTO etl_logs_pdfs (file_name, step, status, error_message)
+                VALUES (%s, %s, %s, %s)
+            """, (file_name or f"report_id={report_id}", "validate_op_report", "error", msg))
+            print(f"[INVÁLIDO] report_id={report_id}: {msg}")
+            invalid_ids.append(report_id)
+        else:
+            valid_ids.append(report_id)
+
+    conn_pipe.commit()
+    cur_pipe.close(); conn_pipe.close()
+    cur_op.close();   conn_op.close()
+
+    print(f"validate_op_report — {len(valid_ids)} válidos, {len(invalid_ids)} inválidos")
+    return valid_ids, invalid_ids
+
+
+if __name__ == "__main__":
+    validate()

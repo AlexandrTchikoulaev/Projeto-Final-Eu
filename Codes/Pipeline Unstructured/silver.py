@@ -36,7 +36,6 @@ def get_embedding_function():
 
 
 def get_already_indexed() -> set:
-    """Devolve o conjunto de nomes de ficheiros já indexados na BD vetorial."""
     conn = psycopg2.connect(
         host=DB_SETTINGS["host"],
         port=DB_SETTINGS["port"],
@@ -53,7 +52,6 @@ def get_already_indexed() -> set:
         """)
         indexed = {row[0] for row in cur.fetchall()}
     except Exception:
-        # Tabela pode ainda não existir
         indexed = set()
     cur.close()
     conn.close()
@@ -137,7 +135,6 @@ def add_to_pgvector(chunks: list):
     )
     embedding_fn = get_embedding_function()
 
-    # Inserir em lotes de BATCH_SIZE
     for i in range(0, len(chunks), BATCH_SIZE):
         batch = chunks[i:i + BATCH_SIZE]
         PGVector.from_documents(
@@ -153,7 +150,7 @@ def add_to_pgvector(chunks: list):
 
 
 def main():
-    print("A correr ingest_vectorialdb...")
+    print("A correr silver (ingest vectorial)...")
 
     already_indexed = get_already_indexed()
     print(f"Documentos já indexados: {len(already_indexed)}")
@@ -167,7 +164,7 @@ def main():
     chunks = split_documents(documents)
     chunks = assign_chunk_ids(chunks)
     add_to_pgvector(chunks)
-    print("ingest_vectorialdb concluído.")
+    print("silver concluído.")
 
 
 if __name__ == "__main__":
