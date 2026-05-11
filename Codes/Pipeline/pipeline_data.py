@@ -67,13 +67,13 @@ def get_prev_last_run():
 
 
 def run_pipeline():
-    import validate_opdata
+    import bronze_validations
     import bronze
-    import validate_bronze
+    import silver_validations
     import silver
-    import validate_silver
+    import gold_validations
     import gold
-    import report_pipeline
+    import pipeline_data_report
 
     run_start    = datetime.now()
     prev_last_run = get_prev_last_run()
@@ -84,19 +84,19 @@ def run_pipeline():
     success = False
     try:
         # 1. Validar op_data
-        run_step("1/6 — validate_opdata", validate_opdata.validate)
+        run_step("1/6 — validate_opdata", bronze_validations.validate)
 
         # 2. Ingerir ficheiros brutos para Bronze
         run_step("2/6 — ingest_raw", bronze.main)
 
         # 3. Validar camada Bronze
-        run_step("3/6 — validate_bronze", validate_bronze.validate)
+        run_step("3/6 — validate_bronze", silver_validations.validate)
 
         # 4. Transformar para Silver
         run_step("4/6 — transform", silver.transformar)
 
         # 5. Validar camada Silver
-        run_step("5/6 — validate_silver", validate_silver.validate)
+        run_step("5/6 — validate_silver", gold_validations.validate)
 
         # 6. Carregar para o Data Warehouse
         run_step("6/6 — load", gold.run_etl)
@@ -107,7 +107,7 @@ def run_pipeline():
     finally:
         update_timestamp()
         try:
-            report_pipeline.generate(prev_last_run, run_start, success)
+            pipeline_data_report.generate(prev_last_run, run_start, success)
         except Exception as e:
             print(f"[AVISO] Não foi possível gerar o relatório: {e}")
 

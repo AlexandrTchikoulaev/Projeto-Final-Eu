@@ -42,16 +42,14 @@ MINIO_BUCKETS = ["bronze", "silver", "bronze-unstructured"]
 
 # Scripts de criação (ordem importa)
 CREATE_SCRIPTS = [
-    "Codes/Setup/setup_etl_data.py",
-    "Codes/Setup/setup_etl_logs.py",
-    "Codes/Setup/setup_opdb.py",
-    "Codes/Setup/setup_datawarehouse.py",
+    "Codes/Setup/setup_gestao_db.py",
+    "Codes/Setup/setup_datawarehouse_db.py",
     "Codes/Setup/setup_vectorial_db.py",
 ]
 
 POPULATE_SCRIPT = "Extra/populate_opdb_csv.py"
 
-ETL_SCRIPT = "Codes/Pipeline/pipeline_dados.py"
+ETL_SCRIPT = "Codes/Pipeline/pipeline_data.py"
 
 
 # ===============================

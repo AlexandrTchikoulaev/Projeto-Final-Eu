@@ -308,6 +308,26 @@ def load_facts(mapping, report_map):
     print("Fact table carregada (Em Bloco)")
 
 # ===============================
+# VIEWS
+# ===============================
+def ensure_views():
+    cur_dw.execute("""
+        CREATE OR REPLACE VIEW vw_indicator_location_year AS
+        SELECT
+            di.indicator_name,
+            dl.name  AS location_name,
+            fv.value,
+            dd.year
+        FROM fact_values fv
+        JOIN dim_indicator di ON fv.indicator_sk = di.indicator_sk
+        JOIN dim_location   dl ON fv.location_sk  = dl.location_sk
+        JOIN dim_date        dd ON fv.date_id      = dd.date_id;
+    """)
+    conn_dw.commit()
+    print("Views atualizadas")
+
+
+# ===============================
 # PIPELINE
 # ===============================
 def run_etl():
@@ -315,6 +335,7 @@ def run_etl():
 
     if not mapping:
         print("Sem novos dados para carregar.")
+        ensure_views()
         return
 
     print("1. Dimensões")
@@ -325,6 +346,9 @@ def run_etl():
 
     print("3. Facts")
     load_facts(mapping, report_map)
+
+    print("4. Views")
+    ensure_views()
 
     print("ETL concluído com sucesso")
 

@@ -17,6 +17,8 @@ import boto3
 sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "Pipeline")))
 from silver_functions import EXTRACT_FUNCTIONS as _EXTRACT_FUNCTIONS, FUNCTION_FILE_TYPE
 
+from sql_chat import chatbot_sql
+
 # ── RAG imports ──────────────────────────────────────────
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_community.llms.ollama import Ollama
@@ -42,17 +44,20 @@ BUCKET_RAW = "bronze"
 
 
 PROMPT_TEMPLATE = """
-Answer the question based only on the following context:
+You are a helpful assistant. Answer the question based only on the following context.
+Always respond in European Portuguese, regardless of the language of the context.
+If the context does not contain enough information to answer, say so in Portuguese.
 
+Context:
 {context}
 
 ---
 
-Answer the question based on the above context: {question}
-"""
+Question: {question}
+Answer (in Portuguese):"""
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-PIPELINE_DADOS_SCRIPT = os.path.normpath(os.path.join(_HERE, "..", "Pipeline", "pipeline_dados.py"))
+PIPELINE_DADOS_SCRIPT = os.path.normpath(os.path.join(_HERE, "..", "Pipeline", "pipeline_data.py"))
 PIPELINE_PDFS_SCRIPT  = os.path.normpath(os.path.join(_HERE, "..", "Pipeline Unstructured", "pipeline_pdfs.py"))
 
 
@@ -106,7 +111,7 @@ app = FastAPI(title="Repositório de Rankings e Relatórios")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["GET", "POST", "PATCH"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -536,7 +541,7 @@ def get_reports():
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute("""
             SELECT report_id, source_code, file_name, report_url, publication_date,
-                   area_tematica, estado, palavras_chave, resumo
+                   area_tematica, estado, palavras_chave, resumo, created_at
             FROM op_report ORDER BY report_id DESC;
         """)
         rows = cur.fetchall()
@@ -554,7 +559,7 @@ def get_op_data():
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute("""
             SELECT d.file_id, d.report_id, d.file_url,
-                   d.extract_function, d.file_type, r.source_code
+                   d.extract_function, d.file_type, r.source_code, d.created_at
             FROM op_data d
             LEFT JOIN op_report r ON r.report_id = d.report_id
             ORDER BY d.file_id DESC;
@@ -745,6 +750,50 @@ def patch_op_report(report_id: int, data: ReportPatch):
             pass
 
         return {"message": "Relatório atualizado. Será reingerido na próxima execução da pipeline."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/op_report/{report_id}")
+def delete_op_report(report_id: int):
+    """Apaga relatório (CASCADE em op_data) apenas se ainda não processado por etl_pdfs."""
+    try:
+        conn = get_operational_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+        cur.execute("SELECT created_at FROM op_report WHERE report_id = %s", (report_id,))
+        report = cur.fetchone()
+        if not report:
+            cur.close(); conn.close()
+            raise HTTPException(status_code=404, detail="Relatório não encontrado.")
+
+        cur.execute("SELECT last_run FROM etl_data WHERE process_name = 'etl_pdfs'")
+        etl_pdfs = cur.fetchone()
+        if etl_pdfs and etl_pdfs["last_run"] and report["created_at"] <= etl_pdfs["last_run"]:
+            cur.close(); conn.close()
+            raise HTTPException(
+                status_code=409,
+                detail="Este relatório já foi processado pelo pipeline de PDFs e não pode ser apagado diretamente."
+            )
+
+        cur.execute("""
+            SELECT COUNT(*) FROM op_data od
+            JOIN etl_data ed ON ed.process_name = 'etl_dados'
+            WHERE od.report_id = %s AND od.created_at <= ed.last_run
+        """, (report_id,))
+        if cur.fetchone()["count"] > 0:
+            cur.close(); conn.close()
+            raise HTTPException(
+                status_code=409,
+                detail="Este relatório tem dados já processados pelo pipeline de dados e não pode ser apagado diretamente."
+            )
+
+        cur.execute("DELETE FROM op_report WHERE report_id = %s", (report_id,))
+        conn.commit()
+        cur.close(); conn.close()
+        return {"deleted": report_id}
     except HTTPException:
         raise
     except Exception as e:
@@ -1091,5 +1140,16 @@ def chat(body: ChatIn):
     try:
         result = query_rag(body.question)
         return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/chat-data")
+def chat_data(body: ChatIn):
+    if not body.question.strip():
+        raise HTTPException(status_code=400, detail="A pergunta não pode estar vazia.")
+    try:
+        answer = chatbot_sql(body.question)
+        return {"answer": answer, "sources": []}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

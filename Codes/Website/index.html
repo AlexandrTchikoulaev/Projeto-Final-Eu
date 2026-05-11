@@ -366,10 +366,13 @@
       border: 1px solid var(--border);
       border-radius: 0 0 var(--radius) var(--radius);
       overflow-x: auto;
+      overflow-y: auto;
+      max-height: calc(100vh - 260px);
     }
 
     table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 0.78rem; }
     thead { border-bottom: 1px solid var(--border); }
+    thead th { position: sticky; top: 0; z-index: 1; background: var(--surface); }
 
     th {
       padding: 0.7rem 1.2rem;
@@ -448,7 +451,12 @@
     /* CHAT */
     #page-chat { height: calc(100vh - 52px); padding-bottom: 0; }
 
+    #chat-sec-relatorios, #chat-sec-dados { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+
     .chat-layout { display: flex; flex-direction: column; flex: 1; min-height: 0; height: 100%; }
+
+    .msg-bubble.pre { white-space: pre-wrap; }
+    .msg.assistant.wide { max-width: 95%; }
 
     .chat-messages {
       flex: 1;
@@ -852,11 +860,11 @@
 
 <nav>
   <div class="nav-logo">WebSite</div>
-  <button class="nav-btn active" id="nav-insert" onclick="showPage('insert')">Inserir</button>
-  <button class="nav-btn" id="nav-table" onclick="showPage('table')">Tabelas</button>
+  <button class="nav-btn active" id="nav-insert" onclick="showPage('insert')">Adicionar</button>
+  <button class="nav-btn" id="nav-table" onclick="showPage('table')">Registos</button>
   <button class="nav-btn" id="nav-chat" onclick="showPage('chat')">Chat</button>
   <button class="nav-btn" id="nav-dash" onclick="showPage('dash')">Dashboards</button>
-  <button class="nav-btn" id="nav-etl" onclick="showPage('etl')">ETL</button>
+  <button class="nav-btn" id="nav-etl" onclick="showPage('etl')">Painel de Controlo</button>
   <div class="nav-spacer"></div>
   <button class="theme-toggle" onclick="toggleTheme()">tema</button>
 </nav>
@@ -866,8 +874,7 @@
 
   <div class="page-header">
     <div>
-      <h1 id="insert-h1">Inserir Relatório</h1>
-      <div class="sub" id="insert-sub">registo na tabela op_report</div>
+      <h1 id="insert-h1">Adicionar Relatório</h1>
     </div>
     <div class="section-toggle">
       <button class="active" id="itog-relatorios" onclick="switchInsert('relatorios')">Relatórios</button>
@@ -877,31 +884,20 @@
 
   <!-- ── Relatórios ── -->
   <div id="isec-relatorios">
-
   <div class="form-card">
-    <div class="form-grid">
-      <div class="form-group full">
-        <div style="display:flex;justify-content:flex-end;margin-bottom:0.8rem;">
-          <div class="section-toggle sm">
-            <button class="active" id="rtab-url" onclick="setReportSourceMode('url')">URL</button>
-            <button id="rtab-upload" onclick="setReportSourceMode('upload')">Upload</button>
-            <button id="rtab-batch" onclick="setReportSourceMode('batch')">Lote</button>
-          </div>
-        </div>
-        <div id="rsrc-url">
-          <label>report_url</label>
-          <input type="url" id="f-report_url" placeholder="https://exemplo.com/relatorio.pdf"
-            oninput="scheduleDuplicateCheck('report_url', this.value, 'f-dup-url')"/>
-          <span class="dup-warn" id="f-dup-url"></span>
-        </div>
-        <div id="rsrc-upload" style="display:none;">
-          <label>Ficheiro PDF *</label>
-          <input type="file" id="f-up-file" accept=".pdf"
-            onchange="document.getElementById('f-file_name').value = this.files[0]?.name || ''"/>
-        </div>
-        <div id="rsrc-batch" style="display:none;">
-          <label>JSON (array de relatórios)</label>
-          <textarea id="f-batch-json" style="min-height:180px;font-size:0.78rem;" placeholder='[
+    <div style="display:flex;justify-content:flex-end;margin-bottom:0.75rem;">
+      <button id="rbtn-json" style="background:none;border:none;color:var(--text-secondary);font-size:0.8rem;cursor:pointer;padding:0.2rem 0.4rem;border-radius:var(--radius);" onclick="setReportMode('json')">ir para JSON</button>
+      <button id="rbtn-form" style="display:none;background:none;border:none;color:var(--text-secondary);font-size:0.8rem;cursor:pointer;padding:0.2rem 0.4rem;border-radius:var(--radius);" onclick="setReportMode('form')">ir para Formulário</button>
+    </div>
+    <!-- JSON view -->
+    <div id="r-json-view" style="display:none;">
+      <div class="form-group full" style="margin-bottom:0.75rem;">
+        <label>ficheiro JSON</label>
+        <input type="file" id="r-json-file" accept=".json" onchange="loadJsonFile('r-json-file','f-batch-json')"/>
+      </div>
+      <div class="form-group full" style="margin-bottom:1rem;">
+        <label>JSON</label>
+        <textarea id="f-batch-json" style="min-height:180px;font-size:0.78rem;" placeholder='[
   {
     "source_code": "IMF",
     "file_name": "weo_2024.pdf",
@@ -910,45 +906,66 @@
     "area_tematica": "Economia"
   }
 ]'></textarea>
-          <div id="batch-result" style="display:none;font-family:var(--mono);font-size:0.75rem;padding:0.8rem 1rem;border-radius:var(--radius);margin-top:0.5rem;"></div>
+      </div>
+    </div>
+    <!-- Form view -->
+    <div id="r-form-view">
+      <div class="form-grid">
+        <div class="form-group full">
+          <label>título</label>
+          <input type="text" id="f-file_name" placeholder="ex: relatorio_2024_q1.pdf"
+            oninput="scheduleDuplicateCheck('file_name', this.value, 'f-dup-fname')"/>
+          <span class="dup-warn" id="f-dup-fname"></span>
         </div>
-      </div>
-      <div class="form-group" id="rg-file_name">
-        <label>file_name *</label>
-        <input type="text" id="f-file_name" placeholder="ex: relatorio_2024_q1.pdf"
-          oninput="scheduleDuplicateCheck('file_name', this.value, 'f-dup-fname')"/>
-        <span class="dup-warn" id="f-dup-fname"></span>
-      </div>
-      <div class="form-group" id="rg-source_code">
-        <label>source_code *</label>
-        <input type="text" id="f-source_code" placeholder="ex: IMF"/>
-      </div>
-      <div class="form-group" id="rg-pub_date">
-        <label>publication_date *</label>
-        <input type="date" id="f-publication_date"/>
-      </div>
-      <div class="form-group" id="rg-area_tematica">
-        <label>area_tematica</label>
-        <select id="f-area_tematica">
-          <option value="">— Seleciona —</option>
-          <option>Tecnologia</option><option>Economia</option><option>Educação</option>
-          <option>Saúde</option><option>Ambiente</option><option>Outros</option>
-        </select>
-      </div>
-      <div class="form-group" id="rg-estado">
-        <label>estado</label>
-        <select id="f-estado">
-          <option value="">— Seleciona —</option>
-          <option>Anual</option><option>Bienal</option><option>Pontual</option><option>Descontinuado</option>
-        </select>
-      </div>
-      <div class="form-group full" id="rg-palavras_chave">
-        <label>palavras_chave</label>
-        <input type="text" id="f-palavras_chave" placeholder="ex: inflação, PIB, crescimento"/>
-      </div>
-      <div class="form-group full" id="rg-resumo">
-        <label>resumo</label>
-        <textarea id="f-resumo" placeholder="Breve descrição do relatório..."></textarea>
+        <div class="form-group full">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.4rem;">
+            <label id="rfield-label" style="margin:0;">link</label>
+            <div class="section-toggle sm">
+              <button class="active" id="rtog-link" onclick="setReportSource('link')">Link</button>
+              <button id="rtog-ficheiro" onclick="setReportSource('ficheiro')">Ficheiro</button>
+            </div>
+          </div>
+          <div id="rsrc-url">
+            <input type="url" id="f-report_url" placeholder="https://exemplo.com/relatorio.pdf"
+              oninput="scheduleDuplicateCheck('report_url', this.value, 'f-dup-url')"/>
+            <span class="dup-warn" id="f-dup-url"></span>
+          </div>
+          <div id="rsrc-upload" style="display:none;">
+            <input type="file" id="f-up-file" accept=".pdf"
+              onchange="document.getElementById('f-file_name').value = this.files[0]?.name || ''"/>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>fonte</label>
+          <input type="text" id="f-source_code" placeholder="ex: IMF"/>
+        </div>
+        <div class="form-group">
+          <label>data de publicação</label>
+          <input type="date" id="f-publication_date"/>
+        </div>
+        <div class="form-group">
+          <label>área temática</label>
+          <select id="f-area_tematica">
+            <option value="">— Seleciona —</option>
+            <option>Tecnologia</option><option>Economia</option><option>Educação</option>
+            <option>Saúde</option><option>Ambiente</option><option>Outros</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>estado</label>
+          <select id="f-estado">
+            <option value="">— Seleciona —</option>
+            <option>Anual</option><option>Bienal</option><option>Pontual</option><option>Descontinuado</option>
+          </select>
+        </div>
+        <div class="form-group full">
+          <label>palavras chave</label>
+          <input type="text" id="f-palavras_chave" placeholder="ex: inflação, PIB, crescimento"/>
+        </div>
+        <div class="form-group full">
+          <label>resumo</label>
+          <textarea id="f-resumo" placeholder="Breve descrição do relatório..."></textarea>
+        </div>
       </div>
     </div>
     <div class="form-actions">
@@ -961,46 +978,14 @@
   <!-- ── Dados ── -->
   <div id="isec-dados" style="display:none;">
 
-  <!-- Tabs modo dados -->
-  <div style="display:flex;justify-content:flex-end;margin-bottom:1.2rem;">
-    <div class="section-toggle sm">
-      <button class="active" id="dtab-url" onclick="setDataMode('url')">URL</button>
-      <button id="dtab-upload" onclick="setDataMode('upload')">Ficheiro</button>
-      <button id="dtab-batch" onclick="setDataMode('batch')">JSON</button>
+  <!-- Form mode -->
+  <div id="d-form-view" class="form-card">
+    <div style="display:flex;justify-content:flex-end;margin-bottom:0.75rem;">
+      <button id="dbtn-json" style="background:none;border:none;color:var(--text-secondary);font-size:0.8rem;cursor:pointer;padding:0.2rem 0.4rem;border-radius:var(--radius);" onclick="setDataMode2('json')">ir para JSON</button>
     </div>
-  </div>
-
-  <!-- Modo URL dados -->
-  <div id="dmode-url" class="form-card">
     <div class="form-grid">
       <div class="form-group full">
-        <label>file_url *</label>
-        <input type="url" id="d-file_url" placeholder="https://api.imf.org/dados"/>
-      </div>
-      <div class="form-group">
-        <label>report_id *</label>
-        <select id="d-report_id" onclick="loadReportDropdown()">
-          <option value="">— Clica para ver IDs —</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label>extract_function</label>
-        <select id="d-extract_function">
-          <option value="">— A carregar… —</option>
-        </select>
-      </div>
-    </div>
-    <div class="form-actions">
-      <button class="btn-primary" id="btn-add-data" onclick="submitOpData()">Adicionar Ficheiro</button>
-      <button class="btn-ghost" onclick="clearDataForm()">Limpar</button>
-    </div>
-  </div>
-
-  <!-- Modo Upload dados -->
-  <div id="dmode-upload" class="form-card" style="display:none;">
-    <div class="form-grid">
-      <div class="form-group">
-        <label>Relatório *</label>
+        <label>relatório</label>
         <div class="chk-dropdown" id="rep-dropdown">
           <button type="button" class="chk-dropdown-toggle" id="rep-dropdown-toggle" onclick="toggleRepDropdown()">
             <span id="rep-dropdown-label">— Clica para carregar —</span>
@@ -1010,8 +995,23 @@
         </div>
         <input type="hidden" id="d-up-rid"/>
       </div>
-      <div class="form-group">
-        <label>Funções de extração *</label>
+      <div class="form-group full">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.4rem;">
+          <label id="dfield-label" style="margin:0;">link</label>
+          <div class="section-toggle sm">
+            <button class="active" id="dtog-link" onclick="setDataSource('link')">Link</button>
+            <button id="dtog-ficheiro" onclick="setDataSource('ficheiro')">Ficheiro</button>
+          </div>
+        </div>
+        <div id="dsrc-link">
+          <input type="url" id="d-file_url" placeholder="https://api.imf.org/dados"/>
+        </div>
+        <div id="dsrc-ficheiro" style="display:none;">
+          <input type="file" id="d-up-file" accept=".json,.csv,.xlsx,.xls,.xml,.zip" multiple onchange="updateUploadPreview()"/>
+        </div>
+      </div>
+      <div class="form-group full">
+        <label>função</label>
         <div class="chk-dropdown" id="fn-dropdown">
           <button type="button" class="chk-dropdown-toggle" id="fn-dropdown-toggle" onclick="toggleFnDropdown()">
             <span id="fn-dropdown-label">— Seleciona —</span>
@@ -1020,18 +1020,7 @@
           <div class="chk-dropdown-menu" id="fn-dropdown-menu" style="display:none;"></div>
         </div>
       </div>
-      <div class="form-group full">
-        <label>Ficheiros * (.json, .csv, .xlsx, .xls, .xml, .zip)</label>
-        <input type="file" id="d-up-file" accept=".json,.csv,.xlsx,.xls,.xml,.zip" multiple onchange="updateUploadPreview()"/>
-      </div>
     </div>
-
-    <div class="form-actions">
-      <button class="btn-primary" id="btn-add-upload-data" onclick="submitDataUpload()">Carregar Ficheiro(s)</button>
-      <span id="upload-summary" style="font-size:0.78rem;color:var(--text-muted);"></span>
-    </div>
-
-    <!-- Preview ao vivo -->
     <div id="upload-preview" style="display:none;">
       <div class="preview-block">
         <div class="preview-label" id="preview-rows-label">Linhas a criar no op_data</div>
@@ -1047,23 +1036,34 @@
         </table>
       </div>
     </div>
+    <div class="form-actions">
+      <button class="btn-primary" id="btn-data-submit" onclick="submitDataAuto()">Adicionar Ficheiro</button>
+      <span id="upload-summary" style="font-size:0.78rem;color:var(--text-muted);"></span>
+      <button class="btn-ghost" onclick="clearDataForm()">Limpar</button>
+    </div>
   </div>
 
-  <!-- Modo Lote dados -->
-  <div id="dmode-batch" class="form-card" style="display:none;">
+  <!-- JSON mode -->
+  <div id="d-json-view" class="form-card" style="display:none;">
+    <div style="display:flex;justify-content:flex-end;margin-bottom:0.75rem;">
+      <button id="dbtn-form" style="background:none;border:none;color:var(--text-secondary);font-size:0.8rem;cursor:pointer;padding:0.2rem 0.4rem;border-radius:var(--radius);" onclick="setDataMode2('form')">ir para Formulário</button>
+    </div>
+    <div class="form-group full" style="margin-bottom:0.75rem;">
+      <label>ficheiro JSON</label>
+      <input type="file" id="d-json-file" accept=".json" onchange="loadJsonFile('d-json-file','d-batch-json')"/>
+    </div>
     <div class="form-group full" style="margin-bottom:1rem;">
-      <label>JSON / JSONC (array de ficheiros)</label>
+      <label>JSON</label>
       <textarea id="d-batch-json" style="min-height:180px;font-size:0.78rem;" placeholder='[
-  // Ficheiros do relatório IMF 2024
   { "report_id": 1, "file_url": "https://api.imf.org/indicadores", "extract_function": "funcao_imf_indicadores" },
   { "report_id": 1, "file_url": "https://api.imf.org/valores", "extract_function": "funcao_imf_values" }
 ]'></textarea>
     </div>
-    <div id="dbatch-result" style="display:none;font-family:var(--mono);font-size:0.75rem;padding:0.8rem 1rem;border-radius:var(--radius);margin-bottom:1rem;"></div>
     <div class="form-actions">
       <button class="btn-primary" id="btn-dbatch" onclick="submitBatchData()">Importar Lote</button>
     </div>
   </div>
+
   </div><!-- end isec-dados -->
 
 </div>
@@ -1073,8 +1073,7 @@
 
   <div class="page-header">
     <div>
-      <h1 id="table-h1">Tabela op_report</h1>
-      <div class="sub" id="table-sub">/op_report — todos os registos da base de dados</div>
+      <h1>Registos Armazenados</h1>
     </div>
     <div class="section-toggle">
       <button class="active" id="ttog-relatorios" onclick="switchTable('relatorios')">Relatórios</button>
@@ -1097,19 +1096,20 @@
     <table>
       <thead>
         <tr>
-          <th>report_id</th>
-          <th>file_name</th>
-          <th>source_code</th>
-          <th>report_url</th>
-          <th>publication_date</th>
-          <th>area_tematica</th>
-          <th>estado</th>
-          <th>palavras_chave</th>
-          <th>resumo</th>
+          <th style="width:6rem;"></th>
+          <th>Título</th>
+          <th>Fonte</th>
+          <th>Link</th>
+          <th>Data Publicação</th>
+          <th>Área Temática</th>
+          <th>Estado</th>
+          <th>Palavras Chave</th>
+          <th>Resumo</th>
+          <th>Criação</th>
         </tr>
       </thead>
       <tbody id="table-body-report">
-        <tr><td colspan="9"><div class="state-box"><p>A carregar dados...</p></div></td></tr>
+        <tr><td colspan="10"><div class="state-box"><p>A carregar dados...</p></div></td></tr>
       </tbody>
     </table>
   </div>
@@ -1133,16 +1133,15 @@
     <table>
       <thead>
         <tr>
-          <th>file_id</th>
-          <th>report_id</th>
-          <th>source_code</th>
-          <th>file_url</th>
-          <th>extract_function</th>
-          <th>file_type</th>
+          <th>Fonte</th>
+          <th>Ficheiro</th>
+          <th>Função</th>
+          <th>Tipo</th>
+          <th>Criação</th>
         </tr>
       </thead>
       <tbody id="table-body-data">
-        <tr><td colspan="6"><div class="state-box"><p>A carregar dados...</p></div></td></tr>
+        <tr><td colspan="5"><div class="state-box"><p>A carregar dados...</p></div></td></tr>
       </tbody>
     </table>
   </div>
@@ -1153,34 +1152,62 @@
 <div class="page" id="page-chat">
   <div class="page-header">
     <div>
-      <h1>Chat Bot</h1>
-      <div class="sub">/chat — pesquisa semântica via PGVector + Mistral (Ollama)</div>
+      <h1>ChatBot</h1>
     </div>
     <div style="display:flex;align-items:center;gap:1rem;">
-      <button class="btn-ghost" id="btn-update-pdfs" onclick="runPipeline('pdfs', 'btn-update-pdfs')">Atualizar dados</button>
-      <span class="method-tag tag-ai">RAG</span>
+      <button class="btn-ghost" id="btn-update-pdfs" onclick="runPipeline('pdfs', 'btn-update-pdfs')">Atualizar PDFs</button>
+      <div class="section-toggle">
+        <button class="active" id="ctog-relatorios" onclick="switchChat('relatorios')">Relatórios</button>
+        <button id="ctog-dados" onclick="switchChat('dados')">Dados</button>
+      </div>
     </div>
   </div>
 
-  <div class="chat-layout">
-    <div class="chat-messages" id="chat-messages">
-      <div class="chat-welcome" id="chat-welcome">
-        <div class="chat-welcome-line"></div>
-        <p>Faz uma pergunta sobre os documentos indexados.<br/>O modelo irá pesquisar nos embeddings e responder.</p>
-        <div class="chat-welcome-line"></div>
+  <!-- Secção: Relatórios (RAG / PDFs) -->
+  <div id="chat-sec-relatorios">
+    <div class="chat-layout">
+      <div class="chat-messages" id="chat-messages">
+        <div class="chat-welcome" id="chat-welcome">
+          <div class="chat-welcome-line"></div>
+          <p>Faz uma pergunta sobre os documentos indexados.<br/>O modelo irá pesquisar nos embeddings e responder.</p>
+          <div class="chat-welcome-line"></div>
+        </div>
+      </div>
+      <div class="chat-input-bar">
+        <textarea id="chat-input" placeholder="Escreve a tua pergunta..." rows="1"
+          onkeydown="handleChatKey(event)" oninput="autoResize(this)"></textarea>
+        <button class="btn-clear-chat" onclick="clearChat()">Limpar</button>
+        <button class="btn-send" id="btn-send" onclick="sendMessage()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="22" y1="2" x2="11" y2="13"/>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+          </svg>
+        </button>
       </div>
     </div>
+  </div>
 
-    <div class="chat-input-bar">
-      <textarea id="chat-input" placeholder="Escreve a tua pergunta..." rows="1"
-        onkeydown="handleChatKey(event)" oninput="autoResize(this)"></textarea>
-      <button class="btn-clear-chat" onclick="clearChat()">Limpar</button>
-      <button class="btn-send" id="btn-send" onclick="sendMessage()">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <line x1="22" y1="2" x2="11" y2="13"/>
-          <polygon points="22 2 15 22 11 13 2 9 22 2"/>
-        </svg>
-      </button>
+  <!-- Secção: Dados (SQL / Data Warehouse) -->
+  <div id="chat-sec-dados" style="display:none;">
+    <div class="chat-layout">
+      <div class="chat-messages" id="chat-messages-dados">
+        <div class="chat-welcome" id="chat-welcome-dados">
+          <div class="chat-welcome-line"></div>
+          <p>Faz uma pergunta sobre os dados do data warehouse.<br/>O modelo irá gerar uma query SQL e responder.</p>
+          <div class="chat-welcome-line"></div>
+        </div>
+      </div>
+      <div class="chat-input-bar">
+        <textarea id="chat-input-dados" placeholder="Escreve a tua pergunta sobre os dados..." rows="1"
+          onkeydown="handleDataChatKey(event)" oninput="autoResize(this)"></textarea>
+        <button class="btn-clear-chat" onclick="clearDataChat()">Limpar</button>
+        <button class="btn-send" id="btn-send-dados" onclick="sendDataMessage()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="22" y1="2" x2="11" y2="13"/>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+          </svg>
+        </button>
+      </div>
     </div>
   </div>
 </div>
@@ -1196,7 +1223,6 @@
     </div>
     <div style="display:flex;align-items:center;gap:1rem;">
       <button class="btn-ghost" id="btn-update-dash" onclick="runPipeline('dados', 'btn-update-dash')">Atualizar dados</button>
-      <span class="method-tag tag-get">GET</span>
     </div>
   </div>
 
@@ -1329,20 +1355,17 @@
 </div><!-- end page-dash -->
 <div class="page" id="page-etl">
 
-  <!-- Última execução como texto -->
-  <div id="etl-data-text" style="display:flex;gap:2rem;flex-wrap:wrap;font-size:0.82rem;color:var(--text-muted);margin-bottom:2rem;">
-    <span>A carregar...</span>
-  </div>
-
   <!-- Page header com switch -->
   <div class="page-header">
     <div>
-      <h1 id="etl-h1">Ficheiros Inválidos — Relatórios</h1>
-      <div class="sub" id="etl-sub">registos com erros no pipeline de PDFs</div>
+      <h1>Ficheiros Inválidos</h1>
     </div>
-    <div class="section-toggle">
-      <button class="active" id="etog-relatorios" onclick="switchEtlLog('relatorios')">Relatórios</button>
-      <button id="etog-dados" onclick="switchEtlLog('dados')">Dados</button>
+    <div style="display:flex;align-items:center;gap:1rem;">
+      <span id="etl-data-text" style="font-size:0.73rem;color:var(--text-muted);opacity:0.75;">A carregar...</span>
+      <div class="section-toggle">
+        <button class="active" id="etog-relatorios" onclick="switchEtlLog('relatorios')">Relatórios</button>
+        <button id="etog-dados" onclick="switchEtlLog('dados')">Dados</button>
+      </div>
     </div>
   </div>
 
@@ -1480,6 +1503,69 @@
   </div>
 </div>
 
+<!-- ══ Modal editar relatório (Armazenamento) ══ -->
+<div id="report-edit-modal" class="etl-modal-overlay" style="display:none;" onclick="closeReportEditModal(event)">
+  <div class="etl-modal-card" onclick="event.stopPropagation()">
+    <div class="etl-modal-header">
+      <span>Editar Relatório</span>
+      <button class="btn-ghost" style="padding:0.25rem 0.55rem;font-size:0.85rem;line-height:1;" onclick="closeReportEditModal()">×</button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:0.9rem;">
+      <div class="form-group">
+        <label>report_id</label>
+        <input type="text" id="rep-edit-id" disabled/>
+      </div>
+      <div class="form-group">
+        <label>título</label>
+        <input type="text" id="rep-edit-file_name" placeholder="ex: relatorio_2024_q1.pdf"/>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.9rem;">
+        <div class="form-group">
+          <label>fonte</label>
+          <input type="text" id="rep-edit-source_code" placeholder="ex: IMF"/>
+        </div>
+        <div class="form-group">
+          <label>data de publicação</label>
+          <input type="date" id="rep-edit-publication_date"/>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>link</label>
+        <input type="url" id="rep-edit-report_url" placeholder="https://..."/>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.9rem;">
+        <div class="form-group">
+          <label>área temática</label>
+          <select id="rep-edit-area_tematica">
+            <option value="">— Seleciona —</option>
+            <option>Tecnologia</option><option>Economia</option><option>Educação</option>
+            <option>Saúde</option><option>Ambiente</option><option>Outros</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>estado</label>
+          <select id="rep-edit-estado">
+            <option value="">— Seleciona —</option>
+            <option>Anual</option><option>Bienal</option><option>Pontual</option><option>Descontinuado</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>palavras chave</label>
+        <input type="text" id="rep-edit-palavras_chave" placeholder="ex: inflação, PIB, crescimento"/>
+      </div>
+      <div class="form-group">
+        <label>resumo</label>
+        <textarea id="rep-edit-resumo" rows="3" placeholder="Breve descrição do relatório..."></textarea>
+      </div>
+    </div>
+    <div class="etl-modal-footer">
+      <button class="btn-ghost" onclick="closeReportEditModal()">Cancelar</button>
+      <button class="btn-primary" id="btn-rep-edit-save" onclick="saveReportEdit()">Guardar</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <script>
@@ -1487,6 +1573,7 @@
   const ENDPOINT_REPORT       = `${API_BASE}/op_report`;
   const ENDPOINT_OP_DATA      = `${API_BASE}/op_data`;
   const ENDPOINT_CHAT         = `${API_BASE}/chat`;
+  const ENDPOINT_CHAT_DATA    = `${API_BASE}/chat-data`;
   const ENDPOINT_DASHBOARD    = `${API_BASE}/dashboard`;
   const ENDPOINT_DASH_FILTERS = `${API_BASE}/dashboard/filters`;
   const ENDPOINT_TIMESERIES   = `${API_BASE}/dashboard/timeseries`;
@@ -1504,8 +1591,7 @@
     document.getElementById('isec-dados').style.display = tab === 'dados' ? '' : 'none';
     document.getElementById('itog-relatorios').classList.toggle('active', tab === 'relatorios');
     document.getElementById('itog-dados').classList.toggle('active', tab === 'dados');
-    document.getElementById('insert-h1').textContent = tab === 'relatorios' ? 'Inserir Relatório' : 'Inserir Dados';
-    document.getElementById('insert-sub').textContent = tab === 'relatorios' ? 'registo na tabela op_report' : 'registo na tabela op_data';
+    document.getElementById('insert-h1').textContent = tab === 'relatorios' ? 'Adicionar Relatório' : 'Adicionar Dados';
   }
 
   function switchTable(tab) {
@@ -1513,8 +1599,6 @@
     document.getElementById('tsec-dados').style.display = tab === 'dados' ? '' : 'none';
     document.getElementById('ttog-relatorios').classList.toggle('active', tab === 'relatorios');
     document.getElementById('ttog-dados').classList.toggle('active', tab === 'dados');
-    document.getElementById('table-h1').textContent = tab === 'relatorios' ? 'Tabela op_report' : 'Tabela op_data';
-    document.getElementById('table-sub').textContent = tab === 'relatorios' ? '/op_report — todos os registos da base de dados' : '/op_data — todos os registos da base de dados';
     loadTable(tab === 'relatorios' ? 'report' : 'data');
   }
 
@@ -1581,7 +1665,6 @@
       if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
       showToast('Relatório inserido com sucesso.');
       clearReportForm();
-      document.getElementById('d-report_id').innerHTML = '<option value="">— Clica para ver IDs disponíveis —</option>';
     } catch (e) { showToast(`Erro: ${e.message}`, 'error'); }
     finally { btn.disabled = false; btn.textContent = 'Adicionar Relatório'; }
   }
@@ -1695,8 +1778,14 @@
   }
 
   function clearDataForm() {
-    ['d-report_id','d-file_url','d-extract_function']
-      .forEach(id => document.getElementById(id).value = '');
+    const urlEl = document.getElementById('d-file_url');
+    const fileEl = document.getElementById('d-up-file');
+    if (urlEl) urlEl.value = '';
+    if (fileEl) fileEl.value = '';
+    document.getElementById('d-up-rid').value = '';
+    document.getElementById('rep-dropdown-label').textContent = '— Clica para carregar —';
+    document.querySelectorAll('#fn-dropdown-menu input[type="checkbox"]').forEach(c => c.checked = false);
+    updateFnDropdownLabel();
   }
 
   async function submitOpData() {
@@ -1776,41 +1865,46 @@
     count.innerHTML = `<span>${filtered.length}</span> registos`;
 
     if (!filtered.length) {
-      const colSpan = type === 'report' ? 9 : 7;
+      const colSpan = type === 'report' ? 10 : 5;
       tbody.innerHTML = `<tr><td colspan="${colSpan}"><div class="state-box"><p>Nenhum registo encontrado.</p></div></td></tr>`;
       return;
     }
 
     if (type === 'report') {
       tbody.innerHTML = filtered.map(r => {
-        const date = r.publication_date ? new Date(r.publication_date).toLocaleString('pt-PT') : '—';
-        const url  = r.report_url
+        const pubDate   = r.publication_date ? new Date(r.publication_date).toLocaleDateString('pt-PT') : '—';
+        const createdAt = r.created_at ? new Date(r.created_at).toLocaleString('pt-PT') : '—';
+        const url       = r.report_url
           ? `<a href="${escHtml(r.report_url)}" target="_blank">${escHtml(truncate(r.report_url, 45))}</a>`
           : '—';
         return `<tr onclick="selectReportRow(${r.report_id}, this)">
-          <td class="id-cell td-narrow">${escHtml(String(r.report_id))}</td>
+          <td style="width:6rem;white-space:nowrap;" onclick="event.stopPropagation()">
+            <button class="btn-edit-mini" onclick="openReportEditModal(${r.report_id})">editar</button>
+            <button class="btn-edit-mini" style="color:var(--red);" onclick="deleteReport(${r.report_id}, this)">apagar</button>
+          </td>
           <td class="td-wide">${escHtml(r.file_name)}</td>
           <td><span class="badge">${escHtml(r.source_code)}</span></td>
           <td class="url-cell td-wide">${url}</td>
-          <td>${date}</td>
+          <td>${pubDate}</td>
           <td>${escHtml(r.area_tematica || '—')}</td>
           <td>${escHtml(r.estado || '—')}</td>
           <td class="td-wide" title="${escHtml(r.palavras_chave || '')}">${escHtml(truncate(r.palavras_chave, 40) || '—')}</td>
           <td class="td-wide" title="${escHtml(r.resumo || '')}">${escHtml(truncate(r.resumo, 60) || '—')}</td>
+          <td style="white-space:nowrap;">${createdAt}</td>
         </tr>`;
       }).join('');
     } else {
       tbody.innerHTML = filtered.map(r => {
+        const createdAt = r.created_at ? new Date(r.created_at).toLocaleString('pt-PT') : '—';
         const url = r.file_url
           ? `<a href="${escHtml(r.file_url)}" target="_blank">${escHtml(truncate(r.file_url, 40))}</a>`
           : '—';
         return `<tr>
-          <td class="id-cell">${escHtml(String(r.file_id))}</td>
-          <td class="id-cell">${escHtml(String(r.report_id))}</td>
           <td><span class="badge">${escHtml(r.source_code || '—')}</span></td>
           <td class="url-cell">${url}</td>
           <td>${escHtml(r.extract_function || '—')}</td>
           <td>${escHtml(r.file_type || '—')}</td>
+          <td style="white-space:nowrap;">${createdAt}</td>
         </tr>`;
       }).join('');
     }
@@ -1842,6 +1936,22 @@
   }
 
   // ── CHAT ──
+  function switchChat(tab) {
+    const isRel = tab === 'relatorios';
+    document.getElementById('chat-sec-relatorios').style.display = isRel ? '' : 'none';
+    document.getElementById('chat-sec-dados').style.display      = isRel ? 'none' : '';
+    document.getElementById('ctog-relatorios').classList.toggle('active', isRel);
+    document.getElementById('ctog-dados').classList.toggle('active', !isRel);
+    const btn = document.getElementById('btn-update-pdfs');
+    if (isRel) {
+      btn.textContent = 'Atualizar PDFs';
+      btn.onclick = () => runPipeline('pdfs', 'btn-update-pdfs');
+    } else {
+      btn.textContent = 'Atualizar dados';
+      btn.onclick = () => runPipeline('dados', 'btn-update-pdfs');
+    }
+  }
+
   function autoResize(el) {
     el.style.height = 'auto';
     el.style.height = Math.min(el.scrollHeight, 120) + 'px';
@@ -1931,6 +2041,107 @@
     } catch (e) {
       removeTyping();
       appendMessage('assistant', `Erro: ${e.message}`);
+    } finally {
+      sendBtn.disabled = false;
+      input.focus();
+    }
+  }
+
+  // ── CHAT DADOS ──
+  let _lastDataQuestion = '';
+  const _REF_WORDS = /\b(mesmo|mesma|anterior|idem|igual|também|tambem)\b|^e\s+/i;
+
+  function handleDataChatKey(e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendDataMessage(); }
+  }
+
+  function clearDataChat() {
+    _lastDataQuestion = '';
+    document.getElementById('chat-messages-dados').innerHTML = `
+      <div class="chat-welcome" id="chat-welcome-dados">
+        <div class="chat-welcome-line"></div>
+        <p>Faz uma pergunta sobre os dados do data warehouse.<br/>O modelo irá gerar uma query SQL e responder.</p>
+        <div class="chat-welcome-line"></div>
+      </div>`;
+  }
+
+  function appendDataMessage(role, content) {
+    const welcome = document.getElementById('chat-welcome-dados');
+    if (welcome) welcome.remove();
+    const box = document.getElementById('chat-messages-dados');
+    const div = document.createElement('div');
+    div.className = role === 'assistant' ? 'msg assistant wide' : `msg ${role}`;
+    const label = document.createElement('div');
+    label.className = 'msg-label';
+    label.textContent = role === 'user' ? 'Eu' : 'Assistente';
+    const bubble = document.createElement('div');
+    bubble.className = role === 'assistant' ? 'msg-bubble pre' : 'msg-bubble';
+    bubble.textContent = content;
+    div.appendChild(label);
+    div.appendChild(bubble);
+    box.appendChild(div);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function showDataTyping() {
+    const welcome = document.getElementById('chat-welcome-dados');
+    if (welcome) welcome.remove();
+    const box = document.getElementById('chat-messages-dados');
+    const div = document.createElement('div');
+    div.className = 'msg assistant';
+    div.id = 'typing-indicator-dados';
+    const label = document.createElement('div');
+    label.className = 'msg-label';
+    label.textContent = 'Assistente';
+    const bubble = document.createElement('div');
+    bubble.className = 'typing-bubble';
+    bubble.innerHTML = '<span></span><span></span><span></span>';
+    div.appendChild(label);
+    div.appendChild(bubble);
+    box.appendChild(div);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function removeDataTyping() {
+    const el = document.getElementById('typing-indicator-dados');
+    if (el) el.remove();
+  }
+
+  async function sendDataMessage() {
+    const input = document.getElementById('chat-input-dados');
+    const question = input.value.trim();
+    if (!question) return;
+
+    // Inject previous question as context when reference words are detected
+    const effectiveQuestion = (_lastDataQuestion && _REF_WORDS.test(question))
+      ? `Contexto anterior: "${_lastDataQuestion}". ${question}`
+      : question;
+
+    const sendBtn = document.getElementById('btn-send-dados');
+    sendBtn.disabled = true;
+    input.value = '';
+    input.style.height = 'auto';
+
+    appendDataMessage('user', question);
+    showDataTyping();
+
+    try {
+      const res = await fetch(ENDPOINT_CHAT_DATA, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: effectiveQuestion })
+      });
+      removeDataTyping();
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      appendDataMessage('assistant', data.answer ?? 'Sem resposta.');
+      _lastDataQuestion = question;
+    } catch (e) {
+      removeDataTyping();
+      appendDataMessage('assistant', `Erro: ${e.message}`);
     } finally {
       sendBtn.disabled = false;
       input.focus();
@@ -2346,10 +2557,21 @@
     document.getElementById('etl-section-dados').style.display = isRel ? 'none' : '';
     document.getElementById('etog-relatorios').classList.toggle('active', isRel);
     document.getElementById('etog-dados').classList.toggle('active', !isRel);
-    document.getElementById('etl-h1').textContent  = isRel ? 'Ficheiros Inválidos — Relatórios' : 'Ficheiros Inválidos — Dados';
-    document.getElementById('etl-sub').textContent = isRel ? 'registos com erros no pipeline de PDFs' : 'registos com erros no pipeline de dados estruturados';
+    updateEtlDataText(tipo);
     if (isRel  && !allRows.etlLogsPdfs.length)  loadEtlLogsTable('pdfs');
     if (!isRel && !allRows.etlLogsDados.length) loadEtlLogsTable('dados');
+  }
+
+  function updateEtlDataText(tipo) {
+    const el = document.getElementById('etl-data-text');
+    const rows = allRows.etlData;
+    if (!rows || !rows.length) { el.textContent = ''; return; }
+    const processName = tipo === 'relatorios' ? 'etl_pdfs' : 'etl_dados';
+    const label = tipo === 'relatorios' ? 'última atualização de relatórios' : 'última atualização de dados';
+    const row = rows.find(r => r.process_name === processName);
+    if (!row) { el.textContent = ''; return; }
+    const date = row.last_run ? row.last_run.replace('T', ' ').slice(0, 19) : '—';
+    el.textContent = `${label}: ${date}`;
   }
 
   let _etlEditFnsLoaded = false;
@@ -2478,21 +2700,16 @@
 
   async function loadEtlData() {
     const el = document.getElementById('etl-data-text');
-    el.innerHTML = '<span style="color:var(--text-muted);font-size:0.82rem;">A carregar...</span>';
+    el.textContent = 'A carregar...';
     try {
       const res = await fetch(ENDPOINT_ETL_DATA);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const rows = await res.json();
       allRows.etlData = rows;
-      if (!rows.length) { el.innerHTML = '<span style="font-size:0.82rem;color:var(--text-muted);">Sem dados.</span>'; return; }
-      const labels = { etl_dados: 'Última execução — Dados', etl_pdfs: 'Última execução — PDFs' };
-      el.innerHTML = rows.map(r => {
-        const label = labels[r.process_name] || r.process_name;
-        const date = r.last_run ? r.last_run.replace('T', ' ').slice(0, 19) : '—';
-        return `<span style="font-size:0.82rem;"><span style="color:var(--text-secondary);font-weight:500;">${escHtml(label)}</span><span style="color:var(--text-muted);margin-left:0.5rem;">${escHtml(date)}</span></span>`;
-      }).join('');
+      const activeTab = document.getElementById('etog-relatorios').classList.contains('active') ? 'relatorios' : 'dados';
+      updateEtlDataText(activeTab);
     } catch (e) {
-      el.innerHTML = `<span style="font-size:0.82rem;color:var(--red);">Erro: ${escHtml(e.message)}</span>`;
+      el.textContent = '';
     }
   }
 
@@ -2668,32 +2885,82 @@
   document.getElementById('f-publication_date').value = now.toISOString().slice(0,10);
 
   // ── TABS FONTE DO RELATÓRIO ──
-  function setReportSourceMode(mode) {
-    ['url','upload','batch'].forEach(m => {
-      document.getElementById(`rsrc-${m}`).style.display = m === mode ? '' : 'none';
-      document.getElementById(`rtab-${m}`).classList.toggle('active', m === mode);
-    });
-    const isBatch = mode === 'batch';
-    ['rg-file_name','rg-source_code','rg-pub_date','rg-area_tematica','rg-estado','rg-palavras_chave','rg-resumo']
-      .forEach(id => document.getElementById(id).style.display = isBatch ? 'none' : '');
-    const btn = document.getElementById('btn-report-submit');
-    btn.textContent = isBatch ? 'Importar Lote' : mode === 'upload' ? 'Carregar PDF' : 'Adicionar Relatório';
+  function setReportMode(mode) {
+    const isJson = mode === 'json';
+    document.getElementById('r-json-view').style.display = isJson ? '' : 'none';
+    document.getElementById('r-form-view').style.display = isJson ? 'none' : '';
+    document.getElementById('rbtn-json').style.display = isJson ? 'none' : '';
+    document.getElementById('rbtn-form').style.display = isJson ? '' : 'none';
+    document.getElementById('btn-report-submit').textContent = isJson ? 'Importar Lote'
+      : (document.getElementById('rsrc-upload').style.display !== 'none' ? 'Carregar PDF' : 'Adicionar Relatório');
+  }
+
+  function setReportSource(type) {
+    const isLink = type === 'link';
+    document.getElementById('rfield-label').textContent = isLink ? 'link' : 'ficheiro';
+    document.getElementById('rsrc-url').style.display = isLink ? '' : 'none';
+    document.getElementById('rsrc-upload').style.display = isLink ? 'none' : '';
+    document.getElementById('rtog-link').classList.toggle('active', isLink);
+    document.getElementById('rtog-ficheiro').classList.toggle('active', !isLink);
+    if (document.getElementById('r-json-view').style.display === 'none') {
+      document.getElementById('btn-report-submit').textContent = isLink ? 'Adicionar Relatório' : 'Carregar PDF';
+    }
   }
 
   function submitReportAuto() {
-    const mode = document.getElementById('rsrc-upload').style.display !== 'none' ? 'upload'
-               : document.getElementById('rsrc-batch').style.display !== 'none' ? 'batch' : 'url';
-    if (mode === 'url') submitReport();
-    else if (mode === 'upload') submitReportUpload();
-    else submitBatchReports();
+    const isJson = document.getElementById('r-json-view').style.display !== 'none';
+    const isUpload = document.getElementById('rsrc-upload').style.display !== 'none';
+    if (isJson) submitBatchReports();
+    else if (isUpload) submitReportUpload();
+    else submitReport();
   }
 
   // ── TABS MODO DADOS ──
-  function setDataMode(mode) {
-    ['url','upload','batch'].forEach(m => {
-      document.getElementById(`dmode-${m}`).style.display = m === mode ? '' : 'none';
-      document.getElementById(`dtab-${m}`).classList.toggle('active', m === mode);
-    });
+  function setDataMode2(mode) {
+    const isJson = mode === 'json';
+    document.getElementById('d-form-view').style.display = isJson ? 'none' : '';
+    document.getElementById('d-json-view').style.display = isJson ? '' : 'none';
+  }
+
+  function setDataSource(type) {
+    const isLink = type === 'link';
+    document.getElementById('dfield-label').textContent = isLink ? 'link' : 'ficheiro';
+    document.getElementById('dsrc-link').style.display = isLink ? '' : 'none';
+    document.getElementById('dsrc-ficheiro').style.display = isLink ? 'none' : '';
+    document.getElementById('dtog-link').classList.toggle('active', isLink);
+    document.getElementById('dtog-ficheiro').classList.toggle('active', !isLink);
+    document.getElementById('upload-preview').style.display = 'none';
+    document.getElementById('btn-data-submit').textContent = isLink ? 'Adicionar Ficheiro' : 'Carregar Ficheiro(s)';
+  }
+
+  function submitDataAuto() {
+    const isLink = document.getElementById('dsrc-link').style.display !== 'none';
+    if (isLink) submitDataLink();
+    else submitDataUpload();
+  }
+
+  async function submitDataLink() {
+    const report_id = document.getElementById('d-up-rid').value;
+    const file_url  = document.getElementById('d-file_url').value.trim();
+    const fns = getSelectedFns();
+    const extract_function = fns.length ? fns[0] : '';
+    if (!report_id) { showToast('O campo relatório é obrigatório.', 'error'); return; }
+    const btn = document.getElementById('btn-data-submit');
+    btn.disabled = true; btn.textContent = 'A inserir...';
+    try {
+      const res = await fetch(ENDPOINT_OP_DATA, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ report_id: parseInt(report_id), file_url, extract_function })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      showToast('Dados inseridos com sucesso.');
+      clearDataForm();
+    } catch (e) { showToast(e.message, 'error'); }
+    finally { btn.disabled = false; btn.textContent = 'Adicionar Ficheiro'; }
   }
 
   // ── DUPLICATE CHECK ──
@@ -2792,23 +3059,12 @@
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      const div = document.getElementById('batch-result');
-      div.style.display = '';
       if (data.errors.length === 0) {
-        div.style.background = 'var(--green-light)';
-        div.style.color = 'var(--green)';
-        div.style.border = '1px solid color-mix(in srgb, var(--green) 20%, transparent)';
-        div.textContent = `✓ ${data.inserted} relatórios inseridos com sucesso.`;
-        showToast(`${data.inserted} relatórios importados.`);
+        showToast(`${data.inserted} relatórios importados com sucesso.`);
       } else {
-        div.style.background = 'var(--amber-light)';
-        div.style.color = 'var(--amber)';
-        div.style.border = '1px solid color-mix(in srgb, var(--amber) 20%, transparent)';
-        div.textContent = `${data.inserted} inseridos, ${data.errors.length} erros:\n` +
-          data.errors.map(e => `  [${e.index}] ${e.file_name}: ${e.error}`).join('\n');
-        div.style.whiteSpace = 'pre';
         showToast(`${data.inserted} inseridos, ${data.errors.length} erros.`, 'error');
       }
+      document.getElementById('f-batch-json').value = '';
     } catch (e) { showToast(e.message, 'error'); }
     finally { btn.disabled = false; btn.textContent = 'Importar Lote'; }
   }
@@ -2885,7 +3141,7 @@
     fd.append('report_id', reportId);
     fd.append('extract_functions', selectedFns.join(','));
 
-    const btn = document.getElementById('btn-add-upload-data');
+    const btn = document.getElementById('btn-data-submit');
     btn.disabled = true; btn.textContent = 'A carregar...';
     try {
       const res = await fetch(`${API_BASE}/op_data/pairs`, { method: 'POST', body: fd });
@@ -2918,25 +3174,109 @@
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      const div = document.getElementById('dbatch-result');
-      div.style.display = '';
       if (data.errors.length === 0) {
-        div.style.background = 'var(--green-light)';
-        div.style.color = 'var(--green)';
-        div.style.border = '1px solid color-mix(in srgb, var(--green) 20%, transparent)';
-        div.textContent = `✓ ${data.inserted} ficheiros inseridos com sucesso.`;
-        showToast(`${data.inserted} ficheiros importados.`);
+        showToast(`${data.inserted} ficheiros importados com sucesso.`);
       } else {
-        div.style.background = 'var(--amber-light)';
-        div.style.color = 'var(--amber)';
-        div.style.border = '1px solid color-mix(in srgb, var(--amber) 20%, transparent)';
-        div.textContent = `${data.inserted} inseridos, ${data.errors.length} erros:\n` +
-          data.errors.map(e => `  [${e.index}]: ${e.error}`).join('\n');
-        div.style.whiteSpace = 'pre';
         showToast(`${data.inserted} inseridos, ${data.errors.length} erros.`, 'error');
       }
+      document.getElementById('d-batch-json').value = '';
     } catch (e) { showToast(e.message, 'error'); }
     finally { btn.disabled = false; btn.textContent = 'Importar Lote'; }
+  }
+
+  // ── DELETE RELATÓRIO (Armazenamento) ──
+  async function deleteReport(reportId, btn) {
+    if (!confirm(`Apagar relatório ID ${reportId}?\nOs ficheiros de dados associados serão também apagados. Esta ação é irreversível.`)) return;
+    btn.disabled = true;
+    try {
+      const res = await fetch(`${API_BASE}/op_report/${reportId}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      showToast('Relatório apagado com sucesso.');
+      await loadTable('report');
+    } catch (e) {
+      showToast(e.message, 'error');
+      btn.disabled = false;
+    }
+  }
+
+  // ── EDIT RELATÓRIO (Armazenamento) ──
+  async function openReportEditModal(reportId) {
+    try {
+      const res = await fetch(`${API_BASE}/op_report/${reportId}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const r = await res.json();
+      document.getElementById('rep-edit-id').value             = r.report_id;
+      document.getElementById('rep-edit-file_name').value      = r.file_name       ?? '';
+      document.getElementById('rep-edit-source_code').value    = r.source_code     ?? '';
+      document.getElementById('rep-edit-publication_date').value = r.publication_date ? r.publication_date.slice(0, 10) : '';
+      document.getElementById('rep-edit-report_url').value     = r.report_url      ?? '';
+      document.getElementById('rep-edit-area_tematica').value  = r.area_tematica   ?? '';
+      document.getElementById('rep-edit-estado').value         = r.estado          ?? '';
+      document.getElementById('rep-edit-palavras_chave').value = r.palavras_chave  ?? '';
+      document.getElementById('rep-edit-resumo').value         = r.resumo          ?? '';
+    } catch (e) {
+      showToast(`Erro ao carregar: ${escHtml(e.message)}`, 'error'); return;
+    }
+    document.getElementById('report-edit-modal').style.display = 'flex';
+  }
+
+  function closeReportEditModal(e) {
+    if (!e || e.target === document.getElementById('report-edit-modal'))
+      document.getElementById('report-edit-modal').style.display = 'none';
+  }
+
+  async function saveReportEdit() {
+    const reportId = document.getElementById('rep-edit-id').value;
+    const btn = document.getElementById('btn-rep-edit-save');
+    btn.disabled = true; btn.textContent = 'A guardar...';
+    try {
+      const payload = {
+        file_name:        document.getElementById('rep-edit-file_name').value.trim()      || null,
+        source_code:      document.getElementById('rep-edit-source_code').value.trim()    || null,
+        publication_date: document.getElementById('rep-edit-publication_date').value      || null,
+        report_url:       document.getElementById('rep-edit-report_url').value.trim()     || null,
+        area_tematica:    document.getElementById('rep-edit-area_tematica').value         || null,
+        estado:           document.getElementById('rep-edit-estado').value                || null,
+        palavras_chave:   document.getElementById('rep-edit-palavras_chave').value.trim() || null,
+        resumo:           document.getElementById('rep-edit-resumo').value.trim()         || null,
+      };
+      const res = await fetch(`${API_BASE}/op_report/${reportId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      showToast('Relatório atualizado com sucesso.');
+      document.getElementById('report-edit-modal').style.display = 'none';
+      await loadTable('report');
+    } catch (e) {
+      showToast(`Erro: ${escHtml(e.message)}`, 'error');
+    } finally {
+      btn.disabled = false; btn.textContent = 'Guardar';
+    }
+  }
+
+  function loadJsonFile(inputId, textareaId) {
+    const input = document.getElementById(inputId);
+    const file = input.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = e => {
+      try {
+        const parsed = JSON.parse(e.target.result);
+        document.getElementById(textareaId).value = JSON.stringify(parsed, null, 2);
+      } catch {
+        document.getElementById(textareaId).value = e.target.result;
+      }
+      input.value = '';
+    };
+    reader.readAsText(file);
   }
 
 </script>

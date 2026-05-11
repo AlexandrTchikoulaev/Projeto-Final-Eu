@@ -28,8 +28,8 @@ MINIO_CONFIG = {
 
 REPORT_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
-    "..", "..",
-    "pipeline_report_pdfs.txt"
+    "..", "..", "Reports",
+    "pipeline_reports_report.txt"
 )
 
 SEP  = "=" * 72

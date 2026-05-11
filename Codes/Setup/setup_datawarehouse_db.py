@@ -1,3 +1,8 @@
+import sys
+import os
+sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "Extra")))
+from config import DB_WAREHOUSE
+
 import logging
 import psycopg2
 import psycopg2.extras
@@ -8,16 +13,7 @@ logging.getLogger('country_converter').setLevel(logging.ERROR)
 
 
 def main():
-    # -------------------------
-    # Conexão
-    # -------------------------
-    conn = psycopg2.connect(
-        host="localhost",
-        port=5433,
-        dbname="warehouse_db",
-        user="projeto_utilizador",
-        password="projeto"
-    )
+    conn = psycopg2.connect(**DB_WAREHOUSE)
     cur = conn.cursor()
 
     # -------------------------
@@ -29,20 +25,16 @@ def main():
         "dim_indicator",
         "dim_location",
         "dim_date",
-        "dim_report"
+        "dim_report",
     ]
-
     for table in tables:
         cur.execute(f"DROP TABLE IF EXISTS {table} CASCADE;")
         print(f"Tabela {table} apagada")
-
     conn.commit()
 
     # -------------------------
     # Create Tables
     # -------------------------
-
-    # Dimension Indicators
     cur.execute("""
     CREATE TABLE IF NOT EXISTS dim_indicator (
         indicator_sk   SERIAL PRIMARY KEY,
@@ -53,7 +45,6 @@ def main():
     );
     """)
 
-    # Dimension Locations
     cur.execute("""
     CREATE TABLE IF NOT EXISTS dim_location (
         location_sk   SERIAL PRIMARY KEY,
@@ -67,7 +58,6 @@ def main():
     );
     """)
 
-    # Bridge Location Hierarchy
     cur.execute("""
     CREATE TABLE IF NOT EXISTS dim_location_hierarchy (
         parent_location_sk INTEGER REFERENCES dim_location(location_sk),
@@ -77,7 +67,6 @@ def main():
     );
     """)
 
-    # Dimension Date
     cur.execute("""
     CREATE TABLE IF NOT EXISTS dim_date (
         date_id SERIAL PRIMARY KEY,
@@ -85,7 +74,6 @@ def main():
     );
     """)
 
-    # Dimension Reports
     cur.execute("""
     CREATE TABLE IF NOT EXISTS dim_report (
         report_id        SERIAL PRIMARY KEY,
@@ -96,7 +84,6 @@ def main():
     );
     """)
 
-    # Fact Values
     cur.execute("""
     CREATE TABLE IF NOT EXISTS fact_values (
         report_id    INTEGER,
@@ -116,7 +103,6 @@ def main():
     # Seed dim_location (ISO 3166 + UN M.49)
     # -------------------------
     cc = coco.CountryConverter()
-
     seed_data = []
     for c in pycountry.countries:
         region     = cc.convert(c.alpha_3, to='continent')
@@ -128,7 +114,7 @@ def main():
             c.numeric,
             c.name,
             region     if region     != 'not found' else None,
-            sub_region if sub_region != 'not found' else None
+            sub_region if sub_region != 'not found' else None,
         ))
 
     psycopg2.extras.execute_values(cur, """
@@ -136,7 +122,6 @@ def main():
         VALUES %s
         ON CONFLICT (location_code) DO NOTHING
     """, seed_data, page_size=500)
-
     conn.commit()
     print(f"dim_location populada com {len(seed_data)} países ISO 3166")
 
@@ -149,16 +134,32 @@ def main():
         VALUES %s
         ON CONFLICT DO NOTHING
     """, years, page_size=500)
-
     conn.commit()
     print(f"dim_date populada com {len(years)} anos (1750–2040)")
+
+    # -------------------------
+    # Create Views
+    # -------------------------
+    cur.execute("DROP VIEW IF EXISTS vw_indicator_location_year;")
+
+    cur.execute("""
+        CREATE VIEW vw_indicator_location_year AS
+        SELECT
+            di.indicator_name,
+            dl.name          AS location_name,
+            fv.value,
+            dd.year
+        FROM fact_values fv
+        JOIN dim_indicator di ON fv.indicator_sk = di.indicator_sk
+        JOIN dim_location   dl ON fv.location_sk  = dl.location_sk
+        JOIN dim_date        dd ON fv.date_id      = dd.date_id;
+    """)
+    conn.commit()
+    print("View vw_indicator_location_year criada")
 
     cur.close()
     conn.close()
 
 
-# -------------------------
-# Entry point
-# -------------------------
 if __name__ == "__main__":
     main()
