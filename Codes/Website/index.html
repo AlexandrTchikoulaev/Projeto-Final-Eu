@@ -889,6 +889,7 @@
   <button class="nav-btn" id="nav-etl" onclick="showPage('etl')">Painel de Controlo</button>
   <div class="nav-spacer"></div>
   <button class="theme-toggle" onclick="toggleTheme()">tema</button>
+  <button class="theme-toggle" style="color:var(--red);border-color:currentColor;margin-left:0.5rem;" onclick="shutdownSystem()">desligar</button>
 </nav>
 
 <!-- ══════════════ PAGE: INSERT ══════════════ -->
@@ -921,11 +922,14 @@
         <label>JSON</label>
         <textarea id="f-batch-json" style="min-height:180px;font-size:0.78rem;" placeholder='[
   {
-    "source_code": "IMF",
-    "file_name": "weo_2024.pdf",
-    "report_url": "https://...",
-    "publication_date": "2024-01-01",
-    "area_tematica": "Economia"
+    "titulo": "weo_2024.pdf",
+    "link": "https://...",
+    "fonte": "IMF",
+    "data de publicação": "2024-01-01",
+    "área temática": "Economia",
+    "estado": "Anual",
+    "palavras-chave": "inflação, PIB",
+    "resumo": "Breve descrição."
   }
 ]'></textarea>
       </div>
@@ -1078,14 +1082,25 @@
       <button id="dbtn-form" style="background:none;border:none;color:var(--text-secondary);font-size:0.8rem;cursor:pointer;padding:0.2rem 0.4rem;border-radius:var(--radius);" onclick="setDataMode2('form')">ir para Formulário</button>
     </div>
     <div class="form-group full" style="margin-bottom:0.75rem;">
+      <label>relatório</label>
+      <div class="chk-dropdown" id="rep-json-dropdown">
+        <button type="button" class="chk-dropdown-toggle" id="rep-json-dropdown-toggle" onclick="toggleRepJsonDropdown()">
+          <span id="rep-json-dropdown-label">— Clica para carregar —</span>
+          <span>▾</span>
+        </button>
+        <div class="chk-dropdown-menu" id="rep-json-dropdown-menu" style="display:none;"></div>
+      </div>
+      <input type="hidden" id="d-json-rid"/>
+    </div>
+    <div class="form-group full" style="margin-bottom:0.75rem;">
       <label>ficheiro JSON</label>
       <input type="file" id="d-json-file" accept=".json" onchange="loadJsonFile('d-json-file','d-batch-json')"/>
     </div>
     <div class="form-group full" style="margin-bottom:1rem;">
       <label>JSON</label>
       <textarea id="d-batch-json" style="min-height:180px;font-size:0.78rem;" placeholder='[
-  { "report_id": 1, "file_url": "https://api.imf.org/indicadores", "extract_function": "funcao_imf_indicadores" },
-  { "report_id": 1, "file_url": "https://api.imf.org/valores", "extract_function": "funcao_imf_values" }
+  { "link": "https://api.imf.org/indicadores", "função": "funcao_imf_indicadores" },
+  { "link": "https://api.imf.org/valores", "função": "funcao_imf_values" }
 ]'></textarea>
     </div>
     <div class="form-actions">
@@ -1162,6 +1177,7 @@
     <table>
       <thead>
         <tr>
+          <th style="width:6rem;"></th>
           <th>Fonte</th>
           <th>Nome</th>
           <th>Ficheiro</th>
@@ -1170,7 +1186,7 @@
         </tr>
       </thead>
       <tbody id="table-body-data">
-        <tr><td colspan="5"><div class="state-box"><p>A carregar dados...</p></div></td></tr>
+        <tr><td colspan="6"><div class="state-box"><p>A carregar dados...</p></div></td></tr>
       </tbody>
     </table>
   </div>
@@ -1448,6 +1464,33 @@
 
 </div>
 
+<!-- ══ Modal editar dados (página Registos) ══ -->
+<div id="data-edit-modal" class="etl-modal-overlay" style="display:none;" onclick="closeDataEditModal(event)">
+  <div class="etl-modal-card" onclick="event.stopPropagation()">
+    <div class="etl-modal-header">
+      <span>Editar Ficheiro</span>
+      <button class="btn-ghost" style="padding:0.25rem 0.55rem;font-size:0.85rem;line-height:1;" onclick="closeDataEditModal()">×</button>
+    </div>
+    <input type="hidden" id="data-edit-file_id"/>
+    <div style="display:flex;flex-direction:column;gap:0.9rem;">
+      <div class="form-group">
+        <label>nome do ficheiro</label>
+        <input type="text" id="data-edit-file_name" placeholder="nome_ficheiro.json"/>
+      </div>
+      <div class="form-group">
+        <label>extract_function</label>
+        <select id="data-edit-extract_function">
+          <option value="">— Nenhuma —</option>
+        </select>
+      </div>
+    </div>
+    <div class="etl-modal-footer">
+      <button class="btn-ghost" onclick="closeDataEditModal()">Cancelar</button>
+      <button class="btn-primary" id="btn-data-edit-save" onclick="saveDataEdit()">Guardar e Reinserir</button>
+    </div>
+  </div>
+</div>
+
 <!-- ══ Modal editar ficheiro ETL ══ -->
 <div id="etl-edit-modal" class="etl-modal-overlay" style="display:none;" onclick="closeEtlEditModal(event)">
   <div class="etl-modal-card" onclick="event.stopPropagation()">
@@ -1540,22 +1583,21 @@
       <span>Gerar Função</span>
       <button class="btn-ghost" style="padding:0.25rem 0.55rem;font-size:0.85rem;line-height:1;" onclick="closeGenerateModal()">×</button>
     </div>
-    <div class="form-group">
-      <label>tipo de ficheiro</label>
-      <div class="section-toggle">
+    <div style="display:flex;align-items:center;gap:0.75rem;">
+      <span style="font-family:var(--mono);font-size:0.78rem;color:var(--text-muted);letter-spacing:0.03em;white-space:nowrap;">Tipo de Ficheiro</span>
+      <div class="section-toggle sm">
         <button class="active" id="modal-dtype-indicator" onclick="setFileType('indicator')">Indicadores</button>
         <button id="modal-dtype-value" onclick="setFileType('value')">Valores</button>
       </div>
+      <button type="button" class="btn-ghost" id="btn-detect-fn" onclick="detectFunction()" style="margin-left:auto;">Gerar</button>
     </div>
-    <button type="button" class="btn-ghost" id="btn-detect-fn" onclick="detectFunction()" style="width:100%;">Detetar Automaticamente</button>
-    <div id="dfn-auto-result" style="display:none;margin-top:0.75rem;">
+    <div id="dfn-auto-result" style="display:none;">
       <div id="dfn-auto-status" style="font-size:0.78rem;margin-bottom:0.5rem;"></div>
-      <pre id="dfn-auto-code" style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:0.75rem;font-size:0.72rem;overflow-x:auto;max-height:200px;margin:0 0 0.5rem 0;white-space:pre-wrap;"></pre>
-      <div id="dfn-auto-preview" style="font-size:0.74rem;color:var(--text-muted);margin-bottom:0.5rem;"></div>
+      <pre id="dfn-auto-code" style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:0.75rem;font-size:0.72rem;overflow-x:auto;max-height:200px;margin:0 0 0.75rem 0;white-space:pre-wrap;"></pre>
+      <div id="dfn-auto-preview"></div>
     </div>
-    <div class="etl-modal-footer">
-      <button class="btn-ghost" onclick="closeGenerateModal()">Fechar</button>
-      <button type="button" class="btn-primary" id="btn-use-generated" onclick="acceptGeneratedFunction()" disabled>Usar esta função</button>
+    <div class="etl-modal-footer" id="gen-fn-footer" style="display:none;">
+      <button type="button" class="btn-primary" id="btn-use-generated" onclick="acceptGeneratedFunction()">Usar esta função</button>
     </div>
   </div>
 </div>
@@ -1688,6 +1730,14 @@
     html.setAttribute('data-theme', html.getAttribute('data-theme') === 'dark' ? '' : 'dark');
   }
 
+  async function shutdownSystem() {
+    if (!confirm('Parar o sistema?\n\nO servidor e os containers Docker serão encerrados.')) return;
+    try {
+      await fetch(`${API_BASE}/shutdown`, { method: 'POST' });
+    } catch (_) { /* servidor já fechou */ }
+    document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:monospace;font-size:0.85rem;color:#888;letter-spacing:0.1em;">SISTEMA ENCERRADO</div>';
+  }
+
   let toastTimer;
   function showToast(msg, type = 'success') {
     const t = document.getElementById('toast');
@@ -1782,6 +1832,12 @@
       const t = document.getElementById('rep-dropdown-toggle');
       if (t) t.classList.remove('open');
     }
+    const repJsonDd = document.getElementById('rep-json-dropdown');
+    if (repJsonDd && !repJsonDd.contains(e.target)) {
+      document.getElementById('rep-json-dropdown-menu').style.display = 'none';
+      const t = document.getElementById('rep-json-dropdown-toggle');
+      if (t) t.classList.remove('open');
+    }
   });
 
   // ── Tipo de ficheiro (usado no modal de geração) ──
@@ -1794,13 +1850,13 @@
     document.getElementById('modal-dtype-value').classList.toggle('active', type === 'value');
     document.getElementById('dfn-auto-result').style.display = 'none';
     _generatedFnName = null;
-    document.getElementById('btn-use-generated').disabled = true;
+    document.getElementById('gen-fn-footer').style.display = 'none';
   }
 
   function openGenerateModal() {
     _generatedFnName = null;
     document.getElementById('dfn-auto-result').style.display = 'none';
-    document.getElementById('btn-use-generated').disabled = true;
+    document.getElementById('gen-fn-footer').style.display = 'none';
     document.getElementById('gen-fn-modal').style.display = 'flex';
   }
 
@@ -1817,7 +1873,7 @@
     const codeEl    = document.getElementById('dfn-auto-code');
     const previewEl = document.getElementById('dfn-auto-preview');
 
-    btn.disabled = true; btn.textContent = 'A gerar função...';
+    btn.disabled = true; btn.textContent = 'A gerar...';
     resultDiv.style.display = 'none';
     _generatedFnName = null;
 
@@ -1847,19 +1903,33 @@
       if (data.valid) {
         statusEl.innerHTML = `<span style="color:var(--green,#4caf50)">✓ Válida</span> &mdash; <code>${data.function_name}</code>`;
         _generatedFnName = data.function_name;
-        document.getElementById('btn-use-generated').disabled = false;
-        previewEl.textContent = data.preview && data.preview.length
-          ? 'Preview: ' + JSON.stringify(data.preview[0])
-          : '';
+        document.getElementById('gen-fn-footer').style.display = 'flex';
+      if (data.preview && data.preview.length) {
+          const rows = data.preview.slice(0, 5);
+          const keys = Object.keys(rows[0] || {});
+          const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+          let html = '<div style="font-size:0.7rem;color:var(--text-muted);font-family:var(--mono);margin-bottom:0.3rem;">preview</div>';
+          html += '<div style="overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);">';
+          html += '<table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:0.68rem;">';
+          html += '<thead><tr>' + keys.map(k => `<th style="text-align:left;padding:0.25rem 0.5rem;border-bottom:1px solid var(--border);color:var(--text-muted);font-weight:400;white-space:nowrap;background:var(--surface2);">${esc(k)}</th>`).join('') + '</tr></thead>';
+          html += '<tbody>';
+          for (const row of rows) {
+            html += '<tr>' + keys.map(k => `<td style="padding:0.22rem 0.5rem;border-bottom:1px solid var(--border);color:var(--text-secondary);white-space:nowrap;max-width:150px;overflow:hidden;text-overflow:ellipsis;">${esc(row[k])}</td>`).join('') + '</tr>';
+          }
+          html += '</tbody></table></div>';
+          previewEl.innerHTML = html;
+        } else {
+          previewEl.innerHTML = '';
+        }
       } else {
         statusEl.innerHTML = `<span style="color:var(--red,#f44336)">✗ Inválida</span> &mdash; ${data.error || 'Erro desconhecido'}`;
-        document.getElementById('btn-use-generated').disabled = true;
+        document.getElementById('gen-fn-footer').style.display = 'none';
         previewEl.textContent = '';
       }
     } catch (e) {
       showToast(`Erro ao gerar função: ${e.message}`, 'error');
     } finally {
-      btn.disabled = false; btn.textContent = 'Detetar Automaticamente';
+      btn.disabled = false; btn.textContent = 'Gerar';
     }
   }
 
@@ -1979,7 +2049,7 @@
   // ── TABELAS ──
   async function loadTable(type) {
     const endpoint = type === 'report' ? ENDPOINT_REPORT : ENDPOINT_OP_DATA;
-    const colSpan  = type === 'report' ? 5 : 4;
+    const colSpan  = type === 'report' ? 5 : 6;
     const tbody    = document.getElementById(`table-body-${type}`);
 
     tbody.innerHTML = `<tr><td colspan="${colSpan}"><div class="state-box"><div class="spinner"></div><p>A carregar...</p></div></td></tr>`;
@@ -2026,7 +2096,7 @@
     count.innerHTML = `<span>${filtered.length}</span> registos`;
 
     if (!filtered.length) {
-      const colSpan = type === 'report' ? 10 : 4;
+      const colSpan = type === 'report' ? 10 : 6;
       tbody.innerHTML = `<tr><td colspan="${colSpan}"><div class="state-box"><p>Nenhum registo encontrado.</p></div></td></tr>`;
       return;
     }
@@ -2063,7 +2133,14 @@
         const url = r.file_url
           ? `<a href="${escHtml(r.file_url)}" target="_blank">${escHtml(truncate(r.file_url, 40))}</a>`
           : '—';
+        const deleteBtn = r.can_delete
+          ? `<button class="btn-edit-mini" style="color:var(--red);" onclick="deleteDataRow(${r.file_id}, ${JSON.stringify(r.file_name ?? '').replace(/"/g, '&quot;')})">apagar</button>`
+          : '';
         return `<tr>
+          <td style="width:6rem;white-space:nowrap;" onclick="event.stopPropagation()">
+            <button class="btn-edit-mini" onclick="openDataEditModal(${r.file_id})">editar</button>
+            ${deleteBtn}
+          </td>
           <td><span class="badge">${escHtml(r.source_code || '—')}</span></td>
           <td class="td-wide">${escHtml(r.file_name || '—')}</td>
           <td class="url-cell">${url}</td>
@@ -2760,12 +2837,14 @@
       const res = await fetch(`${API_BASE}/extract_functions`);
       if (!res.ok) return;
       const fns = await res.json();
-      const sel = document.getElementById('etl-edit-extract_function');
-      fns.forEach(f => {
-        const opt = document.createElement('option');
-        opt.value = f.name; opt.textContent = f.name;
-        opt.dataset.fileType = f.file_type || '';
-        sel.appendChild(opt);
+      ['etl-edit-extract_function', 'data-edit-extract_function'].forEach(selId => {
+        const sel = document.getElementById(selId);
+        if (!sel) return;
+        fns.forEach(f => {
+          const opt = document.createElement('option');
+          opt.value = f.name; opt.textContent = f.name;
+          sel.appendChild(opt);
+        });
       });
       _etlEditFnsLoaded = true;
     } catch (_) {}
@@ -2794,6 +2873,69 @@
     if (!e || e.target === document.getElementById('etl-edit-modal')) {
       document.getElementById('etl-edit-modal').style.display = 'none';
     }
+  }
+
+  async function openDataEditModal(fileId) {
+    await _loadEtlEditFunctions();
+    try {
+      const res = await fetch(`${API_BASE}/op_data/${fileId}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const row = await res.json();
+      document.getElementById('data-edit-file_id').value          = row.file_id;
+      document.getElementById('data-edit-file_name').value        = row.file_name ?? '';
+      document.getElementById('data-edit-extract_function').value = row.extract_function ?? '';
+    } catch (e) {
+      showToast(`Erro ao carregar ficheiro: ${escHtml(e.message)}`, 'error');
+      return;
+    }
+    document.getElementById('data-edit-modal').style.display = 'flex';
+  }
+
+  function closeDataEditModal(e) {
+    if (!e || e.target === document.getElementById('data-edit-modal')) {
+      document.getElementById('data-edit-modal').style.display = 'none';
+    }
+  }
+
+  async function saveDataEdit() {
+    const fileId = document.getElementById('data-edit-file_id').value;
+    const btn = document.getElementById('btn-data-edit-save');
+    btn.disabled = true; btn.textContent = 'A guardar...';
+    try {
+      const payload = {
+        file_name:        document.getElementById('data-edit-file_name').value.trim() || null,
+        extract_function: document.getElementById('data-edit-extract_function').value || null,
+      };
+      const res = await fetch(`${API_BASE}/op_data/${fileId}/edit`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      showToast('Ficheiro atualizado. Será reinserido na próxima pipeline.', 'ok');
+      document.getElementById('data-edit-modal').style.display = 'none';
+      loadTable('data');
+    } catch (e) {
+      showToast(`Erro: ${escHtml(e.message)}`, 'error');
+    } finally {
+      btn.disabled = false; btn.textContent = 'Guardar e Reinserir';
+    }
+  }
+
+  async function deleteDataRow(fileId, fileName) {
+    if (!confirm(`Apagar "${fileName || 'file_id ' + fileId}"?\n\nRemove da base de dados e do MinIO.`)) return;
+    try {
+      const res = await fetch(`${API_BASE}/op_data/${fileId}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      showToast('Ficheiro apagado.', 'ok');
+      loadTable('data');
+    } catch (e) { showToast(`Erro: ${escHtml(e.message)}`, 'error'); }
   }
 
   async function saveEtlEdit() {
@@ -3352,13 +3494,32 @@
     return out;
   }
 
+  const _REPORT_JSON_FIELDS = ['titulo','link','fonte','data de publicação','área temática','estado','palavras-chave','resumo'];
+
   async function submitBatchReports() {
     const raw = document.getElementById('f-batch-json').value.trim();
-    let payload;
+    let parsed;
     try {
-      payload = JSON.parse(sanitizeJson(raw));
-      if (!Array.isArray(payload)) throw new Error('O JSON deve ser um array.');
+      parsed = JSON.parse(sanitizeJson(raw));
+      if (!Array.isArray(parsed)) throw new Error('O JSON deve ser um array.');
+      for (let i = 0; i < parsed.length; i++) {
+        const keys = Object.keys(parsed[i]);
+        const valid = keys.length === _REPORT_JSON_FIELDS.length &&
+          _REPORT_JSON_FIELDS.every(f => keys.includes(f));
+        if (!valid) throw new Error(`Item ${i + 1}: cada entrada deve ter exactamente os campos: ${_REPORT_JSON_FIELDS.map(f => `"${f}"`).join(', ')}.`);
+      }
     } catch (e) { showToast(`JSON inválido: ${e.message}`, 'error'); return; }
+
+    const payload = parsed.map(item => ({
+      file_name:        item['titulo'],
+      report_url:       item['link'],
+      source_code:      item['fonte'],
+      publication_date: item['data de publicação'],
+      area_tematica:    item['área temática'],
+      estado:           item['estado'],
+      palavras_chave:   item['palavras-chave'],
+      resumo:           item['resumo']
+    }));
 
     const btn = document.getElementById('btn-report-submit');
     btn.disabled = true; btn.textContent = 'A importar...';
@@ -3411,6 +3572,33 @@
     document.getElementById('rep-dropdown-label').textContent = name;
     document.getElementById('rep-dropdown-menu').style.display = 'none';
     document.getElementById('rep-dropdown-toggle').classList.remove('open');
+  }
+
+  async function toggleRepJsonDropdown() {
+    const menu   = document.getElementById('rep-json-dropdown-menu');
+    const toggle = document.getElementById('rep-json-dropdown-toggle');
+    const isOpen = menu.style.display !== 'none';
+    if (!isOpen) {
+      try {
+        const res = await fetch(ENDPOINT_REPORT);
+        if (res.ok) {
+          const reports = await res.json();
+          menu.innerHTML = reports.map(r => `
+            <div class="rep-dropdown-item" onclick="selectRepJson(${r.report_id},'${_escHtml(r.file_name)}')">
+              <span>${_escHtml(r.file_name)}</span>
+              <span class="rep-src">${_escHtml(r.source_code || '')}</span>
+            </div>`).join('');
+        }
+      } catch (e) { console.error(e); }
+    }
+    menu.style.display = isOpen ? 'none' : 'block';
+    toggle.classList.toggle('open', !isOpen);
+  }
+  function selectRepJson(id, name) {
+    document.getElementById('d-json-rid').value = id;
+    document.getElementById('rep-json-dropdown-label').textContent = name;
+    document.getElementById('rep-json-dropdown-menu').style.display = 'none';
+    document.getElementById('rep-json-dropdown-toggle').classList.remove('open');
   }
 
   async function _fillReportDropdown(sel) {
@@ -3468,12 +3656,26 @@
 
   // ── SUBMIT: BATCH DADOS ──
   async function submitBatchData() {
+    const reportId = document.getElementById('d-json-rid').value;
+    if (!reportId) { showToast('Seleciona um relatório.', 'error'); return; }
+
     const raw = document.getElementById('d-batch-json').value.trim();
-    let payload;
+    let parsed;
     try {
-      payload = JSON.parse(sanitizeJson(raw));
-      if (!Array.isArray(payload)) throw new Error('O JSON deve ser um array.');
+      parsed = JSON.parse(sanitizeJson(raw));
+      if (!Array.isArray(parsed)) throw new Error('O JSON deve ser um array.');
+      for (let i = 0; i < parsed.length; i++) {
+        const keys = Object.keys(parsed[i]);
+        const valid = keys.length === 2 && keys.includes('link') && keys.includes('função');
+        if (!valid) throw new Error(`Item ${i + 1}: cada entrada deve ter exactamente os campos "link" e "função".`);
+      }
     } catch (e) { showToast(`JSON inválido: ${e.message}`, 'error'); return; }
+
+    const payload = parsed.map(item => ({
+      report_id: parseInt(reportId),
+      file_url: item.link,
+      extract_function: item['função']
+    }));
 
     const btn = document.getElementById('btn-dbatch');
     btn.disabled = true; btn.textContent = 'A importar...';

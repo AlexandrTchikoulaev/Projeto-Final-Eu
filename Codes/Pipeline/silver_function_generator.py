@@ -204,8 +204,9 @@ def _patch_items_guards(code: str) -> str:
 
 
 def _make_function_name(fmt: str, file_type: str, content: bytes) -> str:
-    h = hashlib.md5(content[:512]).hexdigest()[:6]
-    return f"funcao_auto_{fmt}_{file_type}_{h}"
+    h = hashlib.md5(content[:512]).hexdigest()[:4]
+    tipo = "indicadores" if file_type == "indicator" else "valores"
+    return f"{tipo}_{h}"
 
 
 def _error_hint(error: str) -> str:
@@ -250,18 +251,15 @@ _REQUIRED_COLS = {
 }
 
 
-def _validate(code: str, parsed_data, file_type: str) -> dict:
+def _validate(code: str, parsed_data, file_type: str, function_name: str) -> dict:
     namespace = {"pd": pd}
     try:
         exec(compile(code, "<generated>", "exec"), namespace)
     except SyntaxError as e:
         return {"valid": False, "error": f"Erro de sintaxe: {e}", "preview": None}
 
-    fn = next(
-        (v for k, v in namespace.items() if callable(v) and k.startswith("funcao_")),
-        None,
-    )
-    if fn is None:
+    fn = namespace.get(function_name)
+    if fn is None or not callable(fn):
         return {"valid": False, "error": "Nenhuma função encontrada no código gerado.", "preview": None}
 
     try:
@@ -357,7 +355,7 @@ def generate_and_validate(content: bytes, file_type: str) -> dict:
                 "preview": None,
             }
 
-        validation = _validate(code, parsed_data, file_type)
+        validation = _validate(code, parsed_data, file_type, function_name)
         if validation["valid"]:
             break
         last_error = validation["error"]

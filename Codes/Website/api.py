@@ -11,11 +11,12 @@ import sys
 import os
 import re
 import json
+import threading
 import boto3
 
 # Importar mapeamentos do silver_functions
 sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "Pipeline")))
-from silver_functions import EXTRACT_FUNCTIONS as _EXTRACT_FUNCTIONS, FUNCTION_FILE_TYPE
+from silver_functions import EXTRACT_FUNCTIONS as _EXTRACT_FUNCTIONS
 from silver_function_generator import generate_and_validate as _generate_and_validate
 
 from sql_chat import chatbot_sql
@@ -148,6 +149,11 @@ class OpDataIn(BaseModel):
 class OpDataPatch(BaseModel):
     report_id: Optional[int] = None
     file_url: Optional[str] = None
+    file_name: Optional[str] = None
+    extract_function: Optional[str] = None
+
+
+class OpDataSimplePatch(BaseModel):
     file_name: Optional[str] = None
     extract_function: Optional[str] = None
 
@@ -528,19 +534,16 @@ def _load_auto_store() -> dict:
         return {}
 
 
-def _save_to_auto_store(name: str, code: str, file_type: str):
+def _save_to_auto_store(name: str, code: str):
     from datetime import datetime
     store = _load_auto_store()
     store[name] = {
         "code":       code,
-        "file_type":  file_type,
         "created_at": datetime.now().isoformat(),
     }
     with open(_AUTO_STORE, "w", encoding="utf-8") as f:
         json.dump(store, f, ensure_ascii=False, indent=2)
-    # Refresh in-memory EXTRACT_FUNCTIONS so api.py sees it immediately
     _EXTRACT_FUNCTIONS.update({name: None})
-    FUNCTION_FILE_TYPE[name] = file_type
 
 
 @app.post("/generate_function")
@@ -557,7 +560,7 @@ async def generate_function(
 
     if result["generated"] and result["valid"]:
         try:
-            _save_to_auto_store(result["function_name"], result["code"], file_type)
+            _save_to_auto_store(result["function_name"], result["code"])
         except Exception as e:
             result["error"] = f"Função válida mas erro ao guardar: {e}"
 
@@ -596,7 +599,7 @@ async def generate_function_url(body: GenerateFunctionUrlIn):
 
     if result["generated"] and result["valid"]:
         try:
-            _save_to_auto_store(result["function_name"], result["code"], body.file_type)
+            _save_to_auto_store(result["function_name"], result["code"])
         except Exception as e:
             result["error"] = f"Função válida mas erro ao guardar: {e}"
 
@@ -690,9 +693,19 @@ def get_op_data():
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute("""
             SELECT d.file_id, d.report_id, d.file_url,
-                   d.extract_function, r.source_code, d.file_name, d.created_at
+                   d.extract_function, r.source_code, d.file_name, d.created_at,
+                   CASE
+                     WHEN ed.last_run IS NULL      THEN TRUE
+                     WHEN d.created_at > ed.last_run THEN TRUE
+                     WHEN EXISTS (
+                       SELECT 1 FROM etl_logs_dados eld
+                       WHERE eld.file_id = d.file_id::text
+                     )                             THEN TRUE
+                     ELSE FALSE
+                   END AS can_delete
             FROM op_data d
-            LEFT JOIN op_report r ON r.report_id = d.report_id
+            LEFT JOIN op_report r  ON r.report_id  = d.report_id
+            LEFT JOIN etl_data  ed ON ed.process_name = 'etl_dados'
             ORDER BY d.file_id DESC;
         """)
         rows = cur.fetchall()
@@ -721,6 +734,34 @@ def get_op_data_by_id(file_id: int):
         if not row:
             raise HTTPException(status_code=404, detail=f"file_id {file_id} não encontrado.")
         return dict(row)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.patch("/op_data/{file_id}/edit")
+def patch_op_data_simple(file_id: int, data: OpDataSimplePatch):
+    """Edita apenas nome e função de extração; repõe created_at para reprocessamento."""
+    try:
+        conn = get_operational_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE op_data
+            SET file_name        = COALESCE(%s, file_name),
+                extract_function = COALESCE(%s, extract_function),
+                created_at       = CURRENT_TIMESTAMP
+            WHERE file_id = %s
+            RETURNING file_id
+        """, (data.file_name or None, data.extract_function or None, file_id))
+        if not cur.fetchone():
+            conn.rollback()
+            cur.close(); conn.close()
+            raise HTTPException(status_code=404, detail=f"file_id {file_id} não encontrado.")
+        cur.execute("DELETE FROM etl_logs_dados WHERE file_id = %s", (str(file_id),))
+        conn.commit()
+        cur.close(); conn.close()
+        return {"message": "Ficheiro atualizado. Será reinserido na próxima execução da pipeline."}
     except HTTPException:
         raise
     except Exception as e:
@@ -886,30 +927,38 @@ def patch_op_report(report_id: int, data: ReportPatch):
 
 @app.delete("/op_data/{file_id}")
 def delete_op_data(file_id: int):
-    """Apaga ficheiro de dados: remove de op_data, etl_logs_dados e do bucket MinIO bronze."""
+    """Apaga ficheiro de dados apenas se ainda não chegou ao DW."""
     try:
         conn = get_operational_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT file_id FROM op_data WHERE file_id = %s", (file_id,))
-        if not cur.fetchone():
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+        cur.execute("SELECT file_id, created_at FROM op_data WHERE file_id = %s", (file_id,))
+        file_row = cur.fetchone()
+        if not file_row:
             cur.close(); conn.close()
             raise HTTPException(status_code=404, detail=f"file_id {file_id} não encontrado.")
+
+        cur.execute("SELECT last_run FROM etl_data WHERE process_name = 'etl_dados'")
+        etl_row = cur.fetchone()
+        dados_last = etl_row["last_run"] if etl_row else None
+
+        if dados_last and file_row["created_at"] and file_row["created_at"] <= dados_last:
+            cur.execute("SELECT 1 FROM etl_logs_dados WHERE file_id = %s LIMIT 1", (str(file_id),))
+            if not cur.fetchone():
+                cur.close(); conn.close()
+                raise HTTPException(
+                    status_code=409,
+                    detail="Este ficheiro já foi processado e inserido no DW. Não pode ser apagado diretamente."
+                )
+
         cur.execute("DELETE FROM op_data WHERE file_id = %s", (file_id,))
+        cur.execute("DELETE FROM etl_logs_dados WHERE file_id = %s", (str(file_id),))
         conn.commit()
         cur.close(); conn.close()
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-    try:
-        conn_pipe = get_pipeline_connection()
-        cur_pipe = conn_pipe.cursor()
-        cur_pipe.execute("DELETE FROM etl_logs_dados WHERE file_id = %s", (str(file_id),))
-        conn_pipe.commit()
-        cur_pipe.close(); conn_pipe.close()
-    except Exception:
-        pass
 
     try:
         s3 = get_s3()
@@ -984,11 +1033,8 @@ def delete_op_report(report_id: int):
 @app.get("/extract_functions")
 def get_extract_functions():
     auto = _load_auto_store()
-    all_fns = {
-        **{n: FUNCTION_FILE_TYPE.get(n, "") for n in _EXTRACT_FUNCTIONS},
-        **{n: e.get("file_type", "") for n, e in auto.items()},
-    }
-    return [{"name": name, "file_type": ft} for name, ft in all_fns.items()]
+    names = list(_EXTRACT_FUNCTIONS.keys()) + [n for n in auto if n not in _EXTRACT_FUNCTIONS]
+    return [{"name": n} for n in names]
 
 
 @app.get("/sources")
@@ -1262,6 +1308,22 @@ def _stream_script(script_path: str):
             yield f"\n✗ Erro: {e}\n"
 
     return StreamingResponse(stream_output(), media_type="text/plain")
+
+
+@app.post("/shutdown")
+def shutdown():
+    """Para os containers Docker e encerra o servidor."""
+    def _stop():
+        import time
+        time.sleep(0.8)
+        for c in ["projeto_uc", "projeto_pgadmin", "minio"]:
+            subprocess.run(
+                f"docker stop {c}", shell=True, capture_output=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        os._exit(0)
+    threading.Thread(target=_stop, daemon=True).start()
+    return {"message": "Sistema a encerrar..."}
 
 
 @app.post("/etl/run")
