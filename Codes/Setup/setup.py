@@ -3,42 +3,8 @@ import sys
 import time
 import os
 
-# ===============================
-# CONFIGURAÇÕES
-# ===============================
-
-DB_WAREHOUSE = {
-    "host": "localhost",
-    "port": 5433,
-    "dbname": "warehouse_db",
-    "user": "projeto_utilizador",
-    "password": "projeto",
-}
-
-DB_GESTAO = {
-    "host": "localhost",
-    "port": 5433,
-    "dbname": "gestao_db",
-    "user": "projeto_utilizador",
-    "password": "projeto",
-}
-
-DB_VECTOR = {
-    "host": "localhost",
-    "port": 5433,
-    "dbname": "vector_db",
-    "user": "projeto_utilizador",
-    "password": "projeto",
-}
-
-MINIO_CONFIG = {
-    "endpoint": "localhost:9002",
-    "access_key": "admin",
-    "secret_key": "admin123",
-    "secure": False,
-}
-
-MINIO_BUCKETS = ["bronze", "silver", "bronze-unstructured"]
+sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "Extra")))
+from config import DB_WAREHOUSE, DB_GESTAO, DB_VECTOR, MINIO_CONFIG, MINIO_BUCKETS
 
 # Scripts de criação (ordem importa)
 CREATE_SCRIPTS = [
