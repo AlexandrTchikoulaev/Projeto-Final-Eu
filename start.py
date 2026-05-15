@@ -4,6 +4,7 @@ import time
 import os
 import threading
 import urllib.request
+import atexit
 
 from PIL import Image, ImageDraw
 import pystray
@@ -60,6 +61,36 @@ def _monitor_api():
             _window.hide()
         except Exception:
             pass
+
+
+def _kill_port_8000():
+    """Mata qualquer processo órfão que esteja a escutar na porta 8000."""
+    try:
+        result = subprocess.run(
+            ["netstat", "-ano"],
+            capture_output=True, text=True,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        for line in result.stdout.splitlines():
+            parts = line.strip().split()
+            if len(parts) >= 5 and ":8000" in parts[1] and parts[3] == "LISTENING":
+                pid = int(parts[4])
+                subprocess.run(
+                    ["taskkill", "/F", "/PID", str(pid)],
+                    capture_output=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
+    except Exception:
+        pass
+
+
+def _cleanup():
+    """Garante que a API é terminada quando o processo principal sair."""
+    if _api_process and _api_process.poll() is None:
+        _api_process.terminate()
+
+
+atexit.register(_cleanup)
 
 
 def _esperar_docker(timeout=90):
@@ -126,7 +157,10 @@ def _iniciar():
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
 
-    # 4. API
+    # 4. Matar qualquer processo órfão na porta 8000 antes de iniciar a API
+    _kill_port_8000()
+
+    # 5. API
     _api_process = subprocess.Popen(
         [_python_exe, "-m", "uvicorn", "api:app", "--host", "localhost", "--port", "8000"],
         cwd=os.path.join(_script_dir, "Codes", "Website"),
@@ -141,7 +175,7 @@ def _iniciar():
         except Exception:
             time.sleep(1)
 
-    # 5. Carrega a interface e exibe a janela maximizada
+    # 6. Carrega a interface e exibe a janela maximizada
     _window.load_url(_html_url)
     _window.show()
     _window.maximize()

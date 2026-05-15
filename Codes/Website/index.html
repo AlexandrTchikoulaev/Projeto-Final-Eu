@@ -620,6 +620,36 @@
       text-transform: uppercase;
     }
     .dash-control select { width: 100%; }
+    .year-nav { display: flex; gap: 0.3rem; align-items: center; }
+    .year-nav select { flex: 1; min-width: 0; }
+    .year-step {
+      flex-shrink: 0;
+      width: 1.6rem; height: 1.6rem;
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: calc(var(--radius) - 2px);
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      line-height: 1;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: color 0.15s, border-color 0.15s;
+      padding: 0;
+    }
+    .year-step:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+    .year-step:disabled { opacity: 0.25; cursor: not-allowed; }
+    .rank-autocomplete {
+      display: none; position: absolute; left: 0; right: 0; top: calc(100% + 0.2rem);
+      z-index: 30; background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); max-height: 180px; overflow-y: auto;
+    }
+    .rank-ac-item {
+      display: flex; align-items: center; gap: 0.5rem;
+      padding: 0.32rem 0.55rem; font-size: 0.74rem;
+      font-family: var(--mono); color: var(--text-secondary); cursor: pointer;
+    }
+    .rank-ac-item:hover { background: var(--border); }
+    .rank-ac-pos { color: var(--text-muted); font-size: 0.62rem; min-width: 1.8rem; }
     .btn-apply {
       background: var(--accent);
       color: var(--surface);
@@ -1073,6 +1103,111 @@
       transition: opacity 0.12s ease;
     }
     #cell-tooltip.visible { opacity: 1; }
+
+    /* ── Ajuda ─────────────────────────────────────────── */
+    .help-intro {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.4rem 1.8rem;
+      margin-bottom: 2rem;
+      font-size: 0.88rem;
+      line-height: 1.7;
+      color: var(--text-secondary);
+    }
+
+    .help-group {
+      margin-bottom: 2.5rem;
+    }
+
+    .help-group-title {
+      font-family: var(--mono);
+      font-size: 0.65rem;
+      font-weight: 400;
+      color: var(--text-muted);
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      margin-bottom: 0.75rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .faq-item {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      margin-bottom: 0.5rem;
+      overflow: hidden;
+    }
+
+    .faq-question {
+      width: 100%;
+      background: none;
+      border: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1rem 1.4rem;
+      text-align: left;
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      font-weight: 400;
+      color: var(--text);
+      letter-spacing: 0.02em;
+      transition: background var(--transition);
+      gap: 1rem;
+    }
+
+    .faq-question:hover { background: var(--surface2); }
+    .faq-question.open { background: var(--surface2); }
+
+    .faq-icon {
+      font-size: 1rem;
+      color: var(--text-muted);
+      flex-shrink: 0;
+      transition: transform var(--transition);
+      font-style: normal;
+    }
+
+    .faq-question.open .faq-icon { transform: rotate(45deg); }
+
+    .faq-answer {
+      display: none;
+      padding: 0 1.4rem 1.2rem 1.4rem;
+      font-size: 0.84rem;
+      line-height: 1.75;
+      color: var(--text-secondary);
+      border-top: 1px solid var(--border);
+    }
+
+    .faq-answer.open { display: block; }
+
+    .faq-answer p { margin-bottom: 0.7rem; }
+    .faq-answer p:last-child { margin-bottom: 0; }
+
+    .faq-answer strong {
+      color: var(--text);
+      font-weight: 500;
+    }
+
+    .faq-answer .faq-note {
+      background: var(--surface2);
+      border-left: 2px solid var(--border2);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      padding: 0.6rem 0.9rem;
+      margin-top: 0.7rem;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    .faq-answer ul {
+      margin: 0.5rem 0 0.7rem 1.2rem;
+    }
+
+    .faq-answer li {
+      margin-bottom: 0.3rem;
+    }
   </style>
 </head>
 <body>
@@ -1084,6 +1219,7 @@
   <button class="nav-btn" id="nav-dash" onclick="showPage('dash')">Dashboards</button>
   <button class="nav-btn" id="nav-chat" onclick="showPage('chat')">Chat</button>
   <button class="nav-btn" id="nav-etl" onclick="showPage('etl')">Painel de Controlo</button>
+  <button class="nav-btn" id="nav-help" onclick="showPage('help')">Ajuda</button>
   <div class="nav-spacer"></div>
   <button class="theme-toggle" onclick="toggleTheme()">tema</button>
   <button class="theme-toggle" style="color:var(--red);border-color:currentColor;margin-left:0.5rem;" onclick="shutdownSystem()">desligar</button>
@@ -1500,9 +1636,13 @@
       </div>
       <div class="dash-control">
         <label>Ano</label>
-        <select id="dash-year" disabled>
-          <option value="">— Primeiro seleciona um indicador —</option>
-        </select>
+        <div class="year-nav">
+          <button class="year-step" id="dash-year-prev" onclick="stepDashYear(-1)" title="Ano anterior" disabled>&#8249;</button>
+          <select id="dash-year" disabled>
+            <option value="">— Primeiro seleciona um indicador —</option>
+          </select>
+          <button class="year-step" id="dash-year-next" onclick="stepDashYear(1)" title="Próximo ano" disabled>&#8250;</button>
+        </div>
       </div>
       <div class="dash-control">
         <button class="btn-apply" id="btn-apply-dash" onclick="applyDashboard()">Aplicar</button>
@@ -1546,7 +1686,7 @@
       <div class="dash-control">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.45rem;">
           <label style="margin-bottom:0;">Países</label>
-          <button class="btn-ghost" style="padding:0.2rem 0.5rem;font-size:0.65rem;" onclick="deselectAllCountries()">Limpar seleção</button>
+          <button class="btn-ghost" style="padding:0.2rem 0.5rem;font-size:0.65rem;" onclick="deselectAllCountries()">Limpar</button>
         </div>
         <input type="text" class="country-search" id="ts-country-search" placeholder="Filtrar países..." oninput="filterCountryList()"/>
         <div class="country-select-wrap" id="ts-country-list">
@@ -1584,12 +1724,35 @@
       </div>
       <div class="dash-control">
         <label>Ano</label>
-        <select id="rank-year" disabled>
-          <option value="">— Primeiro seleciona um indicador —</option>
-        </select>
+        <div class="year-nav">
+          <button class="year-step" id="rank-year-prev" onclick="stepRankYear(-1)" title="Ano anterior" disabled>&#8249;</button>
+          <select id="rank-year" disabled>
+            <option value="">— Primeiro seleciona um indicador —</option>
+          </select>
+          <button class="year-step" id="rank-year-next" onclick="stepRankYear(1)" title="Próximo ano" disabled>&#8250;</button>
+        </div>
       </div>
       <div class="dash-control">
         <button class="btn-apply" id="btn-apply-rank" onclick="applyRanking()">Aplicar</button>
+      </div>
+      <div class="dash-control">
+        <label>Procurar país</label>
+        <div style="position:relative;">
+          <div style="display:flex;gap:0.3rem;">
+            <div style="position:relative;flex:1;min-width:0;">
+              <input type="text" id="rank-search-country" placeholder="Nome do país..." style="width:100%;padding-right:1.5rem;box-sizing:border-box;" autocomplete="off"
+                oninput="onRankSearchInput()" onkeydown="onRankSearchKey(event)"
+                onblur="setTimeout(()=>{document.getElementById('rank-autocomplete').style.display='none'},150)"/>
+              <button id="rank-search-clear" onclick="clearRankSearch()" title="Limpar"
+                style="display:none;position:absolute;right:0.35rem;top:50%;transform:translateY(-50%);background:none;border:none;padding:0;cursor:pointer;color:var(--text-muted);font-size:0.7rem;line-height:1;">&#x2715;</button>
+            </div>
+            <button class="year-step" style="width:auto;padding:0 0.45rem;" onclick="searchRankCountry()" title="Procurar">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            </button>
+          </div>
+          <div id="rank-autocomplete" class="rank-autocomplete"></div>
+        </div>
+        <div id="rank-search-msg" style="font-size:0.7rem;margin-top:0.3rem;color:var(--text-muted);display:none;"></div>
       </div>
     </div>
 
@@ -1598,7 +1761,7 @@
         <span id="rank-chart-title">Seleciona um indicador e um ano</span>
         <span id="rank-record-count"></span>
       </div>
-      <div style="max-height:520px; overflow-y:auto; overflow-x:hidden;">
+      <div id="rank-scroll" style="max-height:520px; overflow-y:auto; overflow-x:hidden;">
         <div id="rank-plotly" style="min-height:460px;">
           <div class="dash-empty">Seleciona um indicador e um ano e clica em Aplicar.</div>
         </div>
@@ -1618,6 +1781,7 @@
     </div>
     <div style="display:flex;align-items:center;gap:1rem;">
       <span id="etl-data-text" style="font-size:0.73rem;color:var(--text-muted);opacity:0.75;">A carregar...</span>
+      <button class="btn-ghost" id="btn-rebuild-thumbs" onclick="rebuildThumbnails()" title="Gera thumbnails em falta para PDFs já no MinIO">Thumbnails</button>
       <div class="section-toggle">
         <button class="active" id="etog-relatorios" onclick="switchEtlLog('relatorios')">Relatórios</button>
         <button id="etog-dados" onclick="switchEtlLog('dados')">Dados</button>
@@ -1672,6 +1836,232 @@
   </div>
 
 </div>
+
+<!-- ══════════════ PAGE: HELP ══════════════ -->
+<div class="page" id="page-help">
+
+  <div class="page-header">
+    <div>
+      <h1>Ajuda</h1>
+      <div class="sub">Manual de instruções — encontre aqui resposta para as suas dúvidas</div>
+    </div>
+  </div>
+
+  <div class="help-intro">
+    Esta aplicação serve para gerir relatórios e os dados que estão dentro desses relatórios. Pode adicionar documentos PDF, associar ficheiros de dados a esses documentos, e depois visualizar essa informação em gráficos e tabelas. Se tiver alguma dúvida sobre como usar qualquer parte da aplicação, encontra a resposta abaixo.
+  </div>
+
+  <!-- ── Grupo: Relatórios ── -->
+  <div class="help-group">
+    <div class="help-group-title">Relatórios</div>
+
+    <div class="faq-item">
+      <button class="faq-question" onclick="toggleFaq(this)">
+        <span>Como adiciono um relatório?</span>
+        <span class="faq-icon">+</span>
+      </button>
+      <div class="faq-answer">
+        <p>Vá à página <strong>Adicionar</strong> e certifique-se que está no separador <strong>Relatórios</strong>.</p>
+        <p>Tem dois modos à sua escolha:</p>
+        <ul>
+          <li><strong>Formulário</strong> — preencha os campos um a um e clique "Adicionar Relatório". Use este modo quando quiser adicionar um relatório de cada vez.</li>
+          <li><strong>JSON</strong> — cole ou carregue um ficheiro com vários relatórios ao mesmo tempo. Use este modo quando tiver muitos relatórios para inserir de uma vez.</li>
+        </ul>
+        <p>Para mudar de modo, clique no botão "ir para JSON" ou "ir para Formulário" no canto superior direito do formulário.</p>
+      </div>
+    </div>
+
+    <div class="faq-item">
+      <button class="faq-question" onclick="toggleFaq(this)">
+        <span>O que significa cada campo do formulário de relatório?</span>
+        <span class="faq-icon">+</span>
+      </button>
+      <div class="faq-answer">
+        <ul>
+          <li><strong>Título</strong> — o nome do ficheiro PDF (ex: relatorio_2024.pdf). Serve para identificar o relatório.</li>
+          <li><strong>Link</strong> — o endereço do PDF na internet. Se o documento não estiver online, pode fazer upload diretamente (ver pergunta sobre Link vs. Ficheiro).</li>
+          <li><strong>Fonte</strong> — a organização ou entidade que publicou o relatório (ex: IMF, Banco Mundial, INE).</li>
+          <li><strong>Data de publicação</strong> — quando o relatório foi publicado.</li>
+          <li><strong>Área temática</strong> — a categoria do relatório (Economia, Saúde, Educação, etc.).</li>
+          <li><strong>Estado</strong> — se é um relatório Anual, Bienal, Pontual ou Descontinuado.</li>
+          <li><strong>Palavras-chave</strong> — termos que descrevem o conteúdo, separados por vírgula (ex: inflação, PIB).</li>
+          <li><strong>Resumo</strong> — uma breve descrição do relatório.</li>
+        </ul>
+        <div class="faq-note">O título e a data de publicação são obrigatórios. Os restantes campos são opcionais mas ajudam a organizar e encontrar os relatórios mais facilmente.</div>
+      </div>
+    </div>
+
+    <div class="faq-item">
+      <button class="faq-question" onclick="toggleFaq(this)">
+        <span>Como funciona o modo JSON para relatórios?</span>
+        <span class="faq-icon">+</span>
+      </button>
+      <div class="faq-answer">
+        <p>No modo JSON, escreva ou cole uma lista de relatórios no formato indicado. Cada relatório é um bloco entre chavetas <code>{}</code>, e todos os blocos ficam dentro de parênteses retos <code>[]</code>.</p>
+        <p>Os campos são os mesmos do formulário: título, link, fonte, data de publicação, etc. Pode também carregar um ficheiro <strong>.json</strong> diretamente em vez de colar o texto.</p>
+        <div class="faq-note">Se um dos relatórios tiver algum problema (ex: título duplicado), só esse falha — os restantes são inseridos normalmente.</div>
+      </div>
+    </div>
+
+  </div><!-- fim grupo Relatórios -->
+
+  <!-- ── Grupo: Dados ── -->
+  <div class="help-group">
+    <div class="help-group-title">Dados</div>
+
+    <div class="faq-item">
+      <button class="faq-question" onclick="toggleFaq(this)">
+        <span>Como adiciono dados?</span>
+        <span class="faq-icon">+</span>
+      </button>
+      <div class="faq-answer">
+        <p>Vá à página <strong>Adicionar</strong> e mude para o separador <strong>Dados</strong>.</p>
+        <p>Os dados são ficheiros com informação numérica (tabelas de estatísticas, valores por país, etc.) que pertencem a um relatório. Para os adicionar:</p>
+        <ul>
+          <li>Escolha a qual <strong>relatório</strong> estes dados pertencem (clique no campo para ver a lista).</li>
+          <li>Indique onde estão os dados — um endereço de internet (<strong>Link</strong>) ou um ficheiro do seu computador (<strong>Ficheiro</strong>).</li>
+          <li>Escolha a <strong>função</strong> adequada para que o sistema saiba como ler o ficheiro.</li>
+          <li>Clique "Adicionar Ficheiro".</li>
+        </ul>
+        <p>Tal como nos relatórios, também existe um modo <strong>JSON</strong> para inserir vários registos de uma vez.</p>
+      </div>
+    </div>
+
+    <div class="faq-item">
+      <button class="faq-question" onclick="toggleFaq(this)">
+        <span>O que são as Funções e como escolho a certa?</span>
+        <span class="faq-icon">+</span>
+      </button>
+      <div class="faq-answer">
+        <p>A <strong>função</strong> diz ao sistema como deve ler e interpretar o ficheiro de dados — qual é a estrutura, onde estão os valores, etc. Cada tipo de ficheiro pode ter o seu formato específico, por isso é importante escolher a função certa.</p>
+        <p>Se não sabe qual usar, pode clicar no botão <strong>"Gerar"</strong>: o sistema analisa o ficheiro e tenta criar uma função adequada automaticamente. Depois de gerada, ela fica disponível para seleção.</p>
+        <div class="faq-note">Se o sistema não conseguir gerar uma função automaticamente, ou se os dados não ficarem corretos no Dashboard, pode ser necessário pedir ajuda a alguém mais técnico para criar uma função manualmente.</div>
+      </div>
+    </div>
+
+    <div class="faq-item">
+      <button class="faq-question" onclick="toggleFaq(this)">
+        <span>É possível carregar vários ficheiros com várias funções ao mesmo tempo?</span>
+        <span class="faq-icon">+</span>
+      </button>
+      <div class="faq-answer">
+        <p>Sim. Em modo <strong>Ficheiro</strong>, pode selecionar vários ficheiros de uma vez, e também pode escolher várias funções ao mesmo tempo. O sistema cria uma entrada para <strong>cada combinação</strong> de ficheiro e função.</p>
+        <p>Por exemplo: se carregar 2 ficheiros e selecionar 3 funções, o sistema cria automaticamente 6 entradas. Uma pré-visualização aparece antes de confirmar, para que possa ver o que vai ser criado.</p>
+        <div class="faq-note">Use esta funcionalidade quando precisar de extrair tipos diferentes de informação dos mesmos ficheiros.</div>
+      </div>
+    </div>
+
+  </div><!-- fim grupo Dados -->
+
+  <!-- ── Grupo: Fontes de dados ── -->
+  <div class="help-group">
+    <div class="help-group-title">Link e Ficheiro</div>
+
+    <div class="faq-item">
+      <button class="faq-question" onclick="toggleFaq(this)">
+        <span>Qual é a diferença entre Link e Ficheiro?</span>
+        <span class="faq-icon">+</span>
+      </button>
+      <div class="faq-answer">
+        <p>Ao adicionar um relatório ou dados, tem sempre a opção de usar <strong>Link</strong> ou fazer <strong>upload de um Ficheiro</strong>.</p>
+        <ul>
+          <li><strong>Link</strong> — o documento está disponível na internet. Cole o endereço e o sistema vai buscá-lo automaticamente quando processar. Use esta opção quando o ficheiro está publicado online.</li>
+          <li><strong>Ficheiro</strong> — faça upload do ficheiro diretamente para o sistema. O ficheiro fica guardado internamente. Use esta opção quando só tem o documento no seu computador e ele não está disponível online.</li>
+        </ul>
+        <div class="faq-note">Para relatórios, apenas são aceites ficheiros <strong>PDF</strong>. Para dados, são aceites vários formatos: JSON, CSV, Excel, XML e ZIP.</div>
+      </div>
+    </div>
+
+  </div><!-- fim grupo Link/Ficheiro -->
+
+  <!-- ── Grupo: Registos ── -->
+  <div class="help-group">
+    <div class="help-group-title">Registos</div>
+
+    <div class="faq-item">
+      <button class="faq-question" onclick="toggleFaq(this)">
+        <span>Porque é que alguns registos não têm botão Apagar?</span>
+        <span class="faq-icon">+</span>
+      </button>
+      <div class="faq-answer">
+        <p>Quando um relatório ou ficheiro de dados já foi processado pelo sistema e os seus dados estão guardados, ele <strong>fica bloqueado</strong> e não pode ser apagado diretamente.</p>
+        <p>Isto é uma proteção para garantir que não se perdem dados que já estão integrados no sistema.</p>
+        <p>Se precisar de corrigir algo num registo bloqueado, use o botão <strong>"Editar"</strong>. Ao guardar as alterações, o sistema vai tentar reprocessar esse registo automaticamente na próxima vez que correr.</p>
+      </div>
+    </div>
+
+    <div class="faq-item">
+      <button class="faq-question" onclick="toggleFaq(this)">
+        <span>O que acontece quando edito um registo?</span>
+        <span class="faq-icon">+</span>
+      </button>
+      <div class="faq-answer">
+        <p>Ao editar qualquer campo e guardar, o sistema marca o registo como "novo" — como se tivesse sido inserido agora. Isso faz com que seja <strong>reprocessado automaticamente</strong> na próxima vez que o sistema correr.</p>
+        <p>Os erros anteriores associados ao registo são também limpos, dando-lhe uma nova oportunidade de ser processado com sucesso.</p>
+      </div>
+    </div>
+
+  </div><!-- fim grupo Registos -->
+
+  <!-- ── Grupo: Painel de Controlo ── -->
+  <div class="help-group">
+    <div class="help-group-title">Painel de Controlo</div>
+
+    <div class="faq-item">
+      <button class="faq-question" onclick="toggleFaq(this)">
+        <span>O que é o Painel de Controlo?</span>
+        <span class="faq-icon">+</span>
+      </button>
+      <div class="faq-answer">
+        <p>O <strong>Painel de Controlo</strong> mostra os registos que tiveram problemas durante o processamento automático do sistema.</p>
+        <ul>
+          <li><strong>Separador Relatórios</strong> — PDFs que o sistema tentou ler mas encontrou algum problema.</li>
+          <li><strong>Separador Dados</strong> — ficheiros de dados que não foram processados corretamente.</li>
+        </ul>
+        <p>Se aparecer um registo aqui, significa que algo correu mal. Pode clicar no registo para ver a mensagem de erro e editá-lo para tentar corrigir o problema. Depois de editado, o sistema tentará reprocessá-lo automaticamente.</p>
+        <div class="faq-note">Se os erros forem muitos e já não forem relevantes, pode usar o botão "Apagar tudo" para limpar a lista.</div>
+      </div>
+    </div>
+
+  </div><!-- fim grupo Painel -->
+
+  <!-- ── Grupo: Dashboard e Chat ── -->
+  <div class="help-group">
+    <div class="help-group-title">Dashboard e Chat</div>
+
+    <div class="faq-item">
+      <button class="faq-question" onclick="toggleFaq(this)">
+        <span>Como vejo os dados no Dashboard?</span>
+        <span class="faq-icon">+</span>
+      </button>
+      <div class="faq-answer">
+        <p>A página <strong>Dashboards</strong> mostra os dados que já foram processados e estão prontos para consulta.</p>
+        <p>Selecione um <strong>indicador</strong> (o tipo de dado que quer ver, por exemplo: taxa de inflação, PIB per capita) e um <strong>ano</strong>. O sistema mostra um gráfico com os valores por país ou região.</p>
+        <p>Pode também filtrar por um <strong>relatório específico</strong> para ver apenas os dados desse relatório, ou ver todos os relatórios combinados.</p>
+        <div class="faq-note">Só aparecem no Dashboard os dados que já passaram pelo processamento completo. Se acabou de inserir dados, pode demorar até ao próximo ciclo de processamento para aparecerem.</div>
+      </div>
+    </div>
+
+    <div class="faq-item">
+      <button class="faq-question" onclick="toggleFaq(this)">
+        <span>Como funciona o Chat?</span>
+        <span class="faq-icon">+</span>
+      </button>
+      <div class="faq-answer">
+        <p>Na página <strong>Chat</strong> pode fazer perguntas em linguagem normal e o sistema tenta responder com base nos relatórios e dados que tem guardados.</p>
+        <p>Por exemplo, pode perguntar:</p>
+        <ul>
+          <li>"Qual é a taxa de inflação em Portugal em 2023?"</li>
+          <li>"O que diz o relatório do FMI sobre crescimento económico?"</li>
+          <li>"Que países têm o PIB mais elevado?"</li>
+        </ul>
+        <p>O Chat funciona em dois modos: um para perguntas sobre o <strong>conteúdo dos PDFs</strong>, e outro para perguntas sobre os <strong>valores numéricos</strong> dos dados.</p>
+      </div>
+    </div>
+
+  </div><!-- fim grupo Dashboard/Chat -->
+
+</div><!-- fim page-help -->
 
 <!-- ══ Modal editar dados (página Registos) ══ -->
 <div id="data-edit-modal" class="etl-modal-overlay" style="display:none;" onclick="closeDataEditModal(event)">
@@ -1932,6 +2322,13 @@
     document.getElementById('ttog-relatorios').classList.toggle('active', tab === 'relatorios');
     document.getElementById('ttog-dados').classList.toggle('active', tab === 'dados');
     loadTable(tab === 'relatorios' ? 'report' : 'data');
+  }
+
+  function toggleFaq(btn) {
+    const answer = btn.nextElementSibling;
+    const isOpen = btn.classList.contains('open');
+    btn.classList.toggle('open', !isOpen);
+    answer.classList.toggle('open', !isOpen);
   }
 
   function showPage(name) {
@@ -2506,8 +2903,8 @@
         return;
       }
 
-      fetch(`${API_BASE}/op_report/${id}/thumbnail`, { cache: 'no-store' })
-        .then(res => { if (!res.ok) throw new Error(); return res.blob(); })
+      fetch(`${API_BASE}/op_report/${id}/thumbnail`)
+        .then(res => { if (!res.ok) throw new Error(res.status); return res.blob(); })
         .then(blob => {
           const url = URL.createObjectURL(blob);
           thumbnailCache[id] = url;
@@ -2517,7 +2914,7 @@
         })
         .catch(() => {
           const ph = img.closest('.report-card-thumb')?.querySelector('.thumb-placeholder');
-          if (ph) ph.classList.remove('loading');
+          if (ph) { ph.classList.remove('loading'); ph.innerHTML = '<span class="thumb-label">PDF</span>'; }
         });
     });
   }
@@ -2796,6 +3193,9 @@
 
   // ── DASHBOARD ──
   let allCountries = [];
+  let selectedCountries = new Set();
+  let rankSorted = [];
+  let rankChartHeight = 0;
   let dashListenersAdded = false;
 
   async function initDashboard() {
@@ -2821,6 +3221,24 @@
     if (dashListenersAdded) return;
     dashListenersAdded = true;
 
+    // Autocomplete ranking — delegação para evitar problemas de aspas em onclick
+    document.getElementById('rank-autocomplete').addEventListener('mousedown', function (e) {
+      const item = e.target.closest('.rank-ac-item');
+      if (!item) return;
+      e.preventDefault();
+      selectRankCountry(item.dataset.name);
+    });
+
+    // Seleção de países por delegação — preserva seleções ao filtrar
+    document.getElementById('ts-country-list').addEventListener('change', function (e) {
+      if (e.target.type !== 'checkbox') return;
+      const country = e.target.value;
+      if (e.target.checked) selectedCountries.add(country);
+      else selectedCountries.delete(country);
+      document.getElementById('ts-country-search').value = '';
+      renderCountryList(allCountries);
+    });
+
     // Indicador (mapa) → anos
     document.getElementById('dash-indicator').addEventListener('change', async function () {
       const indicator = this.value;
@@ -2845,8 +3263,10 @@
       } catch (e) {
         selYear.innerHTML = '<option value="">Erro ao carregar</option>';
         showToast(`Erro ao carregar anos: ${e.message}`, 'error');
-      } finally { selYear.disabled = false; }
+      } finally { selYear.disabled = false; updateDashYearArrows(); }
     });
+
+    document.getElementById('dash-year').addEventListener('change', updateDashYearArrows);
 
     // Indicador (timeseries) → países
     document.getElementById('ts-indicator').addEventListener('change', async function () {
@@ -2855,6 +3275,7 @@
       const listEl = document.getElementById('ts-country-list');
       listEl.innerHTML = '<label style="color:var(--text-muted);cursor:default;">A carregar países...</label>';
       allCountries = [];
+      selectedCountries.clear();
       document.getElementById('ts-country-search').value = '';
       if (!indicator) { listEl.innerHTML = '<label style="color:var(--text-muted);cursor:default;">Seleciona primeiro um indicador.</label>'; return; }
       try {
@@ -2901,8 +3322,10 @@
       } catch (e) {
         selRankYear.innerHTML = '<option value="">Erro ao carregar</option>';
         showToast(`Erro ao carregar anos: ${e.message}`, 'error');
-      } finally { selRankYear.disabled = false; }
+      } finally { selRankYear.disabled = false; updateRankYearArrows(); }
     });
+
+    document.getElementById('rank-year').addEventListener('change', updateRankYearArrows);
   }
 
   async function onDashReportChange() {
@@ -2921,17 +3344,20 @@
     document.getElementById('dash-indicator').innerHTML = '<option value="">— A carregar... —</option>';
     document.getElementById('dash-year').innerHTML = '<option value="">— Primeiro seleciona um indicador —</option>';
     document.getElementById('dash-year').disabled = true;
+    updateDashYearArrows();
     document.getElementById('ts-indicator').innerHTML = '<option value="">— A carregar... —</option>';
     document.getElementById('ts-country-list').innerHTML = '<label style="color:var(--text-muted);cursor:default;">A carregar...</label>';
     document.getElementById('ts-country-search').value = '';
     document.getElementById('rank-indicator').innerHTML = '<option value="">— A carregar... —</option>';
     document.getElementById('rank-year').innerHTML = '<option value="">— Primeiro seleciona um indicador —</option>';
     document.getElementById('rank-year').disabled = true;
+    updateRankYearArrows();
     document.getElementById('dash-plotly').innerHTML = '<div class="dash-empty">Seleciona um indicador e um ano e clica em Aplicar.</div>';
     document.getElementById('ts-plotly').innerHTML = '<div class="dash-empty">Seleciona um indicador e pelo menos um país e clica em Aplicar.</div>';
     document.getElementById('rank-plotly').innerHTML = '<div class="dash-empty">Seleciona um indicador e um ano e clica em Aplicar.</div>';
     document.getElementById('dash-stats').style.display = 'none';
     allCountries = [];
+    selectedCountries.clear();
 
     try {
       const res = await fetch(`${ENDPOINT_DASH_FILTERS}?${new URLSearchParams({ report_id })}`);
@@ -2974,12 +3400,14 @@
       document.getElementById('rank-record-count').textContent = `${data.length} países`;
 
       if (!data.length) {
+        rankSorted = [];
         document.getElementById('rank-plotly').innerHTML = '<div class="dash-empty">Sem dados para esta combinação.</div>';
         return;
       }
 
       // Ordenar descendentemente
       const sorted = [...data].filter(d => d.value != null).sort((a, b) => b.value - a.value);
+      rankSorted = sorted;
 
       const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
       const gridColor = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)';
@@ -3005,6 +3433,7 @@
 
       // Altura dinâmica: 26px por barra, mínimo 460px
       const chartHeight = Math.max(460, sorted.length * 26);
+      rankChartHeight = chartHeight;
 
       const layout = {
         height: chartHeight,
@@ -3028,6 +3457,8 @@
 
       Plotly.newPlot('rank-plotly', [trace], layout, { responsive: true, displayModeBar: false });
 
+      if (document.getElementById('rank-search-country').value.trim()) searchRankCountry();
+
     } catch (e) {
       showToast(`Erro: ${e.message}`, 'error');
     } finally {
@@ -3042,12 +3473,17 @@
       return;
     }
     listEl.innerHTML = countries.map(c =>
-      `<label><input type="checkbox" value="${escHtml(c)}"/> ${escHtml(c)}</label>`
+      `<label><input type="checkbox" value="${escHtml(c)}"${selectedCountries.has(c) ? ' checked' : ''}/> ${escHtml(c)}</label>`
     ).join('');
   }
 
   function deselectAllCountries() {
-    document.querySelectorAll('#ts-country-list input[type="checkbox"]').forEach(cb => cb.checked = false);
+    selectedCountries.clear();
+    document.getElementById('ts-country-search').value = '';
+    renderCountryList(allCountries);
+    document.getElementById('ts-chart-title').textContent = 'Seleciona um indicador e países';
+    document.getElementById('ts-record-count').textContent = '';
+    document.getElementById('ts-plotly').innerHTML = '<div class="dash-empty">Seleciona um indicador e pelo menos um país e clica em Aplicar.</div>';
   }
 
   function filterCountryList() {
@@ -3058,7 +3494,7 @@
 
   async function applyTimeseries() {
     const indicator = document.getElementById('ts-indicator').value;
-    const checked = [...document.querySelectorAll('#ts-country-list input[type="checkbox"]:checked')].map(c => c.value);
+    const checked = [...selectedCountries];
 
     if (!indicator) { showToast('Seleciona um indicador.', 'error'); return; }
     if (!checked.length) { showToast('Seleciona pelo menos um país.', 'error'); return; }
@@ -3129,6 +3565,7 @@
         hovermode: 'x unified',
       };
 
+      document.getElementById('ts-plotly').innerHTML = '';
       Plotly.newPlot('ts-plotly', traces, layout, { responsive: true, displayModeBar: false });
 
     } catch (e) {
@@ -3136,6 +3573,134 @@
     } finally {
       btn.disabled = false; btn.textContent = 'Aplicar';
     }
+  }
+
+  function onRankSearchInput() {
+    const q = document.getElementById('rank-search-country').value;
+    document.getElementById('rank-search-clear').style.display = q ? '' : 'none';
+    document.getElementById('rank-search-msg').style.display = 'none';
+    clearRankHighlight();
+    updateRankAutocomplete(q);
+  }
+
+  function onRankSearchKey(e) {
+    if (e.key === 'Enter') {
+      document.getElementById('rank-autocomplete').style.display = 'none';
+      searchRankCountry();
+    } else if (e.key === 'Escape') {
+      document.getElementById('rank-autocomplete').style.display = 'none';
+    }
+  }
+
+  function updateRankAutocomplete(q) {
+    const box = document.getElementById('rank-autocomplete');
+    if (!q.trim() || !rankSorted.length) { box.style.display = 'none'; return; }
+    const matches = rankSorted.filter(d => d.location_name.toLowerCase().includes(q.toLowerCase())).slice(0, 8);
+    if (!matches.length) { box.style.display = 'none'; return; }
+    box.innerHTML = matches.map(d => {
+      const pos = rankSorted.indexOf(d) + 1;
+      return `<div class="rank-ac-item" data-name="${escHtml(d.location_name)}"><span class="rank-ac-pos">${pos}º</span><span>${escHtml(d.location_name)}</span></div>`;
+    }).join('');
+    box.style.display = 'block';
+  }
+
+  function selectRankCountry(name) {
+    document.getElementById('rank-search-country').value = name;
+    document.getElementById('rank-search-clear').style.display = '';
+    document.getElementById('rank-autocomplete').style.display = 'none';
+    searchRankCountry();
+  }
+
+  function clearRankSearch() {
+    document.getElementById('rank-search-country').value = '';
+    document.getElementById('rank-search-clear').style.display = 'none';
+    document.getElementById('rank-autocomplete').style.display = 'none';
+    document.getElementById('rank-search-msg').style.display = 'none';
+    clearRankHighlight();
+  }
+
+  function searchRankCountry() {
+    const q = document.getElementById('rank-search-country').value.trim().toLowerCase();
+    const msgEl = document.getElementById('rank-search-msg');
+    msgEl.style.display = 'none';
+    if (!q || !rankSorted.length) return;
+
+    const idx = rankSorted.findIndex(d => d.location_name.toLowerCase().includes(q));
+
+    if (idx === -1) {
+      msgEl.textContent = 'País não encontrado no ranking.';
+      msgEl.style.color = 'var(--error, #c94f1a)';
+      msgEl.style.display = 'block';
+      return;
+    }
+
+    const country = rankSorted[idx].location_name;
+    msgEl.textContent = `${country} — ${idx + 1}º lugar`;
+    msgEl.style.color = 'var(--text-muted)';
+    msgEl.style.display = 'block';
+
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const barColor     = isDark ? '#7a9fd4' : '#2851a3';
+    const highlightCol = isDark ? '#e8855a' : '#c94f1a';
+    Plotly.restyle('rank-plotly', { 'marker.color': [rankSorted.map((_, i) => i === idx ? highlightCol : barColor)] });
+
+    const scrollEl = document.getElementById('rank-scroll');
+    const barH      = (rankChartHeight - 70) / rankSorted.length;
+    const barCenter = 20 + idx * barH + barH / 2;
+    scrollEl.scrollTop = barCenter - scrollEl.clientHeight / 2;
+  }
+
+  function clearRankHighlight() {
+    if (!rankSorted.length) return;
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const barColor = isDark ? '#7a9fd4' : '#2851a3';
+    Plotly.restyle('rank-plotly', { 'marker.color': [rankSorted.map(() => barColor)] });
+  }
+
+  function updateRankYearArrows() {
+    const sel = document.getElementById('rank-year');
+    const prev = document.getElementById('rank-year-prev');
+    const next = document.getElementById('rank-year-next');
+    if (sel.disabled || !sel.value) { prev.disabled = true; next.disabled = true; return; }
+    const cur = parseInt(sel.value);
+    const years = [...sel.options].slice(1).map(o => parseInt(o.value)).filter(y => !isNaN(y));
+    prev.disabled = !years.some(y => y < cur);
+    next.disabled = !years.some(y => y > cur);
+  }
+
+  function stepRankYear(delta) {
+    const sel = document.getElementById('rank-year');
+    if (sel.disabled || !sel.value) return;
+    const cur = parseInt(sel.value);
+    const years = [...sel.options].slice(1).map(o => parseInt(o.value)).filter(y => !isNaN(y));
+    const candidates = years.filter(y => delta > 0 ? y > cur : y < cur);
+    if (!candidates.length) return;
+    sel.value = delta > 0 ? Math.min(...candidates) : Math.max(...candidates);
+    updateRankYearArrows();
+    applyRanking();
+  }
+
+  function updateDashYearArrows() {
+    const sel = document.getElementById('dash-year');
+    const prev = document.getElementById('dash-year-prev');
+    const next = document.getElementById('dash-year-next');
+    if (sel.disabled || !sel.value) { prev.disabled = true; next.disabled = true; return; }
+    const cur = parseInt(sel.value);
+    const years = [...sel.options].slice(1).map(o => parseInt(o.value)).filter(y => !isNaN(y));
+    prev.disabled = !years.some(y => y < cur);
+    next.disabled = !years.some(y => y > cur);
+  }
+
+  function stepDashYear(delta) {
+    const sel = document.getElementById('dash-year');
+    if (sel.disabled || !sel.value) return;
+    const cur = parseInt(sel.value);
+    const years = [...sel.options].slice(1).map(o => parseInt(o.value)).filter(y => !isNaN(y));
+    const candidates = years.filter(y => delta > 0 ? y > cur : y < cur);
+    if (!candidates.length) return;
+    sel.value = delta > 0 ? Math.min(...candidates) : Math.max(...candidates);
+    updateDashYearArrows();
+    applyDashboard();
   }
 
   async function applyDashboard() {
@@ -3655,6 +4220,25 @@
       document.getElementById('btn-ingest').disabled = false;
       document.getElementById('btn-ingest-pdfs').disabled = false;
       btn.textContent = tipo === 'pdfs' ? 'Pipeline PDFs' : 'Pipeline Dados';
+    }
+  }
+
+  async function rebuildThumbnails() {
+    const btn = document.getElementById('btn-rebuild-thumbs');
+    btn.disabled = true;
+    btn.textContent = 'A gerar...';
+    try {
+      const res = await fetch(`${API_BASE}/op_report/thumbnails/rebuild`, { method: 'POST' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      showToast(`Thumbnails: ${data.generated} gerados, ${data.skipped} já existiam, ${data.failed} falharam.`, data.failed > 0 ? 'warn' : 'ok');
+      Object.keys(thumbnailCache).forEach(k => { URL.revokeObjectURL(thumbnailCache[k]); delete thumbnailCache[k]; });
+      if (document.getElementById('report-cards-grid')) loadTable('report');
+    } catch (e) {
+      showToast(`Erro: ${e.message}`, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Thumbnails';
     }
   }
 

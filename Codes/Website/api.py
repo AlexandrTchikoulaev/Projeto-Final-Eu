@@ -37,11 +37,12 @@ MINIO_CONFIG = {
 
 BUCKET_UNSTRUCTURED = "bronze-unstructured"
 BUCKET_RAW = "bronze"
+BUCKET_THUMBNAILS = "thumbnails"
 
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 PIPELINE_DADOS_SCRIPT = os.path.normpath(os.path.join(_HERE, "..", "Pipeline", "pipeline_data.py"))
-PIPELINE_PDFS_SCRIPT  = os.path.normpath(os.path.join(_HERE, "..", "Pipeline Unstructured", "pipeline_pdfs.py"))
+PIPELINE_PDFS_SCRIPT  = os.path.normpath(os.path.join(_HERE, "..", "Pipeline Unstructured", "pipeline_reports.py"))
 
 
 # ── Helpers ───────────────────────────────────────────────
@@ -65,6 +66,36 @@ def ensure_bucket(s3, bucket: str):
         s3.head_bucket(Bucket=bucket)
     except Exception:
         s3.create_bucket(Bucket=bucket)
+
+
+def _make_thumbnail(pdf_bytes: bytes) -> bytes | None:
+    """Converte a primeira página de um PDF em JPEG. Devolve None em caso de falha."""
+    try:
+        import fitz
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        if len(doc) == 0:
+            doc.close()
+            return None
+        pix = doc[0].get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False)
+        img_bytes = pix.tobytes("jpeg")
+        doc.close()
+        return img_bytes
+    except Exception:
+        return None
+
+
+def _cache_thumbnail(s3, report_id: int, img_bytes: bytes):
+    """Guarda thumbnail no MinIO. Falha silenciosamente."""
+    try:
+        ensure_bucket(s3, BUCKET_THUMBNAILS)
+        s3.put_object(
+            Bucket=BUCKET_THUMBNAILS,
+            Key=f"{report_id}.jpg",
+            Body=img_bytes,
+            ContentType="image/jpeg",
+        )
+    except Exception:
+        pass
 
 
 def strip_jsonc_comments(text: str) -> str:
@@ -231,6 +262,10 @@ async def upload_report(
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao guardar PDF no MinIO: {e}")
+
+    img = _make_thumbnail(content)
+    if img:
+        _cache_thumbnail(s3, report_id, img)
 
     return {"report_id": report_id, "message": "PDF carregado e relatório registado com sucesso."}
 
@@ -1427,14 +1462,28 @@ def get_etl_errors_since(tipo: str = "dados", minutes: int = 15):
 
 @app.get("/op_report/{report_id}/thumbnail")
 def get_report_thumbnail(report_id: int):
-    """Gera thumbnail JPEG da primeira página do PDF (MinIO ou URL externo)."""
+    """Serve thumbnail JPEG da primeira página do PDF. Usa cache MinIO; gera na primeira chamada."""
     try:
-        import fitz
+        import fitz  # noqa: F401
     except ImportError:
         raise HTTPException(status_code=503, detail="PyMuPDF não instalado.")
 
     from fastapi.responses import Response
 
+    s3 = get_s3()
+
+    # 1. Servir do cache se já existir
+    try:
+        obj = s3.get_object(Bucket=BUCKET_THUMBNAILS, Key=f"{report_id}.jpg")
+        return Response(
+            content=obj["Body"].read(),
+            media_type="image/jpeg",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+    except Exception:
+        pass
+
+    # 2. Obter metadados do relatório
     try:
         conn = get_operational_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -1450,46 +1499,98 @@ def get_report_thumbnail(report_id: int):
 
     pdf_bytes = None
 
-    # 1. Tentar MinIO
+    # 3. Tentar MinIO
     try:
-        s3 = get_s3()
         obj = s3.get_object(Bucket=BUCKET_UNSTRUCTURED, Key=row["file_name"])
         pdf_bytes = obj["Body"].read()
     except Exception:
         pass
 
-    # 2. Fallback: URL externo (download completo — xref do PDF está no fim do ficheiro)
+    # 4. Fallback: URL externo
     if pdf_bytes is None and row.get("report_url"):
         try:
             import requests as _req
-            resp = _req.get(row["report_url"], timeout=60)
+            resp = _req.get(
+                row["report_url"],
+                timeout=30,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "Accept": "application/pdf,*/*",
+                },
+                allow_redirects=True,
+            )
             resp.raise_for_status()
-            pdf_bytes = resp.content
+            if resp.content[:4] == b"%PDF":
+                pdf_bytes = resp.content
         except Exception:
             pass
 
-    if pdf_bytes is None or not pdf_bytes.startswith(b"%PDF"):
+    if not pdf_bytes or not pdf_bytes.startswith(b"%PDF"):
         raise HTTPException(status_code=404, detail="PDF não encontrado ou inválido.")
 
-    try:
-        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-        if len(doc) == 0:
-            doc.close()
-            raise HTTPException(status_code=404, detail="PDF sem páginas.")
-        page = doc[0]
-        pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False)
-        img_bytes = pix.tobytes("jpeg")
-        doc.close()
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao gerar thumbnail: {e}")
+    img_bytes = _make_thumbnail(pdf_bytes)
+    if not img_bytes:
+        raise HTTPException(status_code=500, detail="Erro ao gerar thumbnail.")
+
+    _cache_thumbnail(s3, report_id, img_bytes)
 
     return Response(
         content=img_bytes,
         media_type="image/jpeg",
-        headers={"Cache-Control": "public, max-age=3600"},
+        headers={"Cache-Control": "public, max-age=86400"},
     )
+
+
+@app.post("/op_report/thumbnails/rebuild")
+def rebuild_thumbnails():
+    """Regenera thumbnails em falta para todos os relatórios que têm PDF no MinIO."""
+    try:
+        import fitz  # noqa: F401
+    except ImportError:
+        raise HTTPException(status_code=503, detail="PyMuPDF não instalado.")
+
+    s3 = get_s3()
+    ensure_bucket(s3, BUCKET_THUMBNAILS)
+
+    existing_thumbs: set[str] = set()
+    paginator = s3.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=BUCKET_THUMBNAILS):
+        for obj in page.get("Contents", []):
+            existing_thumbs.add(obj["Key"])
+
+    try:
+        conn = get_operational_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT report_id, file_name FROM op_report ORDER BY report_id")
+        reports = cur.fetchall()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    done, skipped, failed = 0, 0, 0
+    for r in reports:
+        thumb_key = f"{r['report_id']}.jpg"
+        if thumb_key in existing_thumbs:
+            skipped += 1
+            continue
+        pdf_bytes = None
+        try:
+            obj = s3.get_object(Bucket=BUCKET_UNSTRUCTURED, Key=r["file_name"])
+            pdf_bytes = obj["Body"].read()
+        except Exception:
+            pass
+        if not pdf_bytes:
+            failed += 1
+            continue
+        img = _make_thumbnail(pdf_bytes)
+        if img:
+            _cache_thumbnail(s3, r["report_id"], img)
+            done += 1
+        else:
+            failed += 1
+
+    return {"generated": done, "skipped": skipped, "failed": failed}
 
 
 @app.post("/chat")

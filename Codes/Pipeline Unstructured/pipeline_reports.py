@@ -71,11 +71,11 @@ def get_prev_last_run():
 
 
 def run_pipeline():
-    import validate_op_report
+    import bronze_validations as validate_op_report
     import bronze
-    import validate_bronze_unstructured
+    import silver_validations as validate_bronze_unstructured
     import silver
-    import report_pipeline_pdfs
+    import pipeline_reports_report as report_pipeline_pdfs
 
     run_start     = datetime.now()
     prev_last_run = get_prev_last_run()

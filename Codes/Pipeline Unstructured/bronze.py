@@ -25,11 +25,40 @@ MINIO_CONFIG = {
 }
 
 BUCKET_UNSTRUCTURED = "bronze-unstructured"
+BUCKET_THUMBNAILS = "thumbnails"
 PROCESS_NAME = "etl_pdfs"
 
 
 def is_valid_pdf(content: bytes) -> bool:
     return content[:4] == b"%PDF"
+
+
+def _generate_thumbnail(s3, report_id: int, pdf_bytes: bytes):
+    """Gera thumbnail da primeira página e guarda no MinIO. Silencioso em caso de falha."""
+    try:
+        import fitz
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        if len(doc) == 0:
+            doc.close()
+            return
+        pix = doc[0].get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False)
+        img_bytes = pix.tobytes("jpeg")
+        doc.close()
+        try:
+            s3.head_bucket(Bucket=BUCKET_THUMBNAILS)
+        except Exception:
+            s3.create_bucket(Bucket=BUCKET_THUMBNAILS)
+        s3.put_object(
+            Bucket=BUCKET_THUMBNAILS,
+            Key=f"{report_id}.jpg",
+            Body=img_bytes,
+            ContentType="image/jpeg",
+        )
+        print(f"[THUMB] Thumbnail gerado: report_id={report_id}")
+    except ImportError:
+        pass
+    except Exception as e:
+        print(f"[THUMB] Erro report_id={report_id}: {e}")
 
 
 def main(valid_ids=None):
@@ -140,6 +169,7 @@ def main(valid_ids=None):
                         "file_name": file_name,
                     },
                 )
+                _generate_thumbnail(s3, report_id, content)
                 print(f"[OK]   {file_name}")
                 ok_count += 1
 
