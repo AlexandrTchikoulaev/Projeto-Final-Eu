@@ -16,9 +16,10 @@ Para funcionar precisas de instalar no computador:
   1. Git
   2. Python 3.11
   3. Docker Desktop
-  4. As bibliotecas Python do projeto (instaladas automaticamente)
+  4. Ollama (motor de inteligência artificial local)
+  5. As bibliotecas Python do projeto (instaladas automaticamente)
 
-Tempo estimado de instalação: 30 a 60 minutos (dependendo da velocidade da internet)
+Tempo estimado de instalação: 45 a 90 minutos (dependendo da velocidade da internet)
 
 
 ══════════════════════════════════════════════════════════════════════════════════
@@ -235,13 +236,86 @@ PASSO 15 — Instalar as bibliotecas Python.
 
 
 ══════════════════════════════════════════════════════════════════════════════════
-  PARTE 5 — CONFIGURAÇÃO INICIAL DO SISTEMA (SÓ FAZER UMA VEZ)
+  PARTE 5 — INSTALAR O OLLAMA E OS MODELOS DE IA
+══════════════════════════════════════════════════════════════════════════════════
+
+O Ollama é um motor que corre modelos de inteligência artificial localmente no
+teu computador, sem necessidade de internet nem de serviços externos pagos.
+O sistema usa dois modelos: "qwen2.5:7b" (para gerar código e responder a
+perguntas) e "mxbai-embed-large" (para pesquisa semântica nos relatórios).
+
+ATENÇÃO: Os modelos ocupam espaço em disco. Certifica-te de que tens pelo
+menos 10 GB livres antes de começar este passo.
+
+
+PASSO 16 | Descarregar o instalador do Ollama.
+
+  Abrir o browser no site oficial do Ollama:  https://ollama.com/download
+  Clicar em "Download for Windows".
+  Aguardar o download terminar (ficheiro chamado "OllamaSetup.exe").
+
+
+PASSO 17 | Instalar o Ollama.
+
+  Abrir o ficheiro "OllamaSetup.exe" que foi acabado de descarregar.
+
+  A instalação é automática — não aparece nenhum assistente com opções.
+  O Ollama instala-se e fica a correr em segundo plano.
+
+  Após a instalação, aparece o ícone do Ollama (uma chama laranja) na barra
+  de tarefas (zona do relógio, canto inferior direito).
+
+
+PASSO 18 | Verificar se o Ollama foi bem instalado.
+
+  Abrir o terminal: Windows + R → escrever "cmd" → carregar Enter
+
+  Escrever:
+       ollama --version
+  e carregar Enter
+
+  Deve aparecer algo como:
+       ollama version 0.x.x
+
+  Se aparecer essa mensagem, o Ollama está instalado corretamente.
+
+
+PASSO 19 | Descarregar os modelos de IA.
+
+  Este passo descarrega os dois modelos necessários. Pode demorar bastante
+  tempo (20 a 60 minutos) dependendo da velocidade da internet.
+  Os modelos são descarregados uma única vez e ficam guardados no computador.
+
+  Com o terminal aberto, escreve o primeiro comando e prime Enter:
+       ollama pull qwen2.5:7b
+
+  Aguarda até aparecer "success" ou "pull complete". Depois escreve:
+       ollama pull mxbai-embed-large
+
+  Aguarda novamente até aparecer "success" ou "pull complete".
+
+
+PASSO 20 | Verificar se os modelos foram descarregados.
+
+  No terminal, escreve:
+       ollama list
+
+  Deves ver os dois modelos na lista, por exemplo:
+       NAME                     ID              SIZE
+       qwen2.5:7b               ...             ~4.7 GB
+       mxbai-embed-large        ...             ~670 MB
+
+  Se ambos aparecerem, os modelos estão prontos a usar.
+
+
+══════════════════════════════════════════════════════════════════════════════════
+  PARTE 6 — CONFIGURAÇÃO INICIAL DO SISTEMA (SÓ FAZER UMA VEZ)
 ══════════════════════════════════════════════════════════════════════════════════
 
 Este passo cria as bases de dados, configura o armazenamento de ficheiros e
 prepara tudo para a primeira utilização. SÓ PRECISAS DE FAZER ISTO UMA VEZ.
 
-PASSO 16 — Garantir que o Docker Desktop está a correr.
+PASSO 21 — Garantir que o Docker Desktop está a correr.
 
   Olha para a barra de tarefas (zona do relógio, canto inferior direito).
   Deve aparecer o ícone do Docker (baleia azul).
@@ -249,7 +323,7 @@ PASSO 16 — Garantir que o Docker Desktop está a correr.
   Aguarda até o ícone ficar estático (não animado) — o Docker está pronto.
 
 
-PASSO 17 — Executar o script de configuração inicial.
+PASSO 22 — Executar o script de configuração inicial.
 
   Abre o terminal NA PASTA DO PROJETO (como explicado no Passo 14)
 
@@ -280,13 +354,13 @@ PASSO 17 — Executar o script de configuração inicial.
 
 
 ══════════════════════════════════════════════════════════════════════════════════
-  PARTE 6 — CRIAR O ÍCONE NO AMBIENTE DE TRABALHO (SÓ FAZER UMA VEZ)
+  PARTE 7 — CRIAR O ÍCONE NO AMBIENTE DE TRABALHO (SÓ FAZER UMA VEZ)
 ══════════════════════════════════════════════════════════════════════════════════
 
 Este passo cria um ícone no ambiente de trabalho para que no futuro baste fazer
 duplo clique para abrir a aplicação. SÓ PRECISAS DE FAZER ISTO UMA VEZ.
 
-PASSO 18 — Criar o ícone no ambiente de trabalho.
+PASSO 23 — Criar o ícone no ambiente de trabalho.
 
   Abre o terminal NA PASTA DO PROJETO (como explicado no Passo 14)
 
@@ -342,6 +416,23 @@ SOLUÇÃO:  O setup inicial pode não ter corrido corretamente. Tenta correr
 
 ----------
 
+PROBLEMA: O chat de dados ou de relatórios não responde / dá erro de ligação
+SOLUÇÃO:  O Ollama não está a correr. Procura "Ollama" no menu Iniciar e abre-o.
+          Aguarda até aparecer o ícone da chama laranja na barra de tarefas.
+          Se o ícone já estiver presente, verifica se os modelos estão instalados:
+            ollama list
+          Se "qwen2.5:7b" ou "mxbai-embed-large" não aparecerem, corre
+          novamente os comandos do PASSO 19.
+
+----------
+
+PROBLEMA: "ollama não é reconhecido como um comando interno ou externo"
+SOLUÇÃO:  O Ollama não foi instalado ou precisa de reiniciar o terminal.
+          Fecha todas as janelas do terminal, abre uma nova e tenta outra vez.
+          Se persistir, reinstala o Ollama (PASSO 16 e 17).
+
+----------
+
 PROBLEMA: "No module named 'fastapi'" ou outro módulo em falta
 SOLUÇÃO:  As bibliotecas não foram instaladas. Repete o PASSO 11.
 
@@ -366,11 +457,14 @@ SOLUÇÃO:  Usa o Windows Search (tecla Windows, escreve "start.py") para
   1. Instala Git — git-scm.com (opções por defeito)
   2. Instala Python 3.11 — python.org (marca "Add to PATH"!)
   3. Instala Docker Desktop — docker.com
-  4. Reinicia o computador
-  5. Abre terminal no Desktop → git clone https://github.com/AlexandrTchikoulaev/Projeto-Final-Eu.git
-  6. Abre terminal NA PASTA Projeto-Final-Eu → pip install -r requirements.txt
-  7. Abre terminal NA PASTA Projeto-Final-Eu → python Codes\Setup\setup.py
-  8. Abre terminal NA PASTA Projeto-Final-Eu → python criar_atalho.py
+  4. Instala Ollama — ollama.com/download
+  5. Reinicia o computador
+  6. Abre terminal no Desktop → git clone https://github.com/AlexandrTchikoulaev/Projeto-Final-Eu.git
+  7. Abre terminal NA PASTA Projeto-Final-Eu → pip install -r requirements.txt
+  8. No terminal → ollama pull qwen2.5:7b   (aguarda terminar)
+  9. No terminal → ollama pull mxbai-embed-large   (aguarda terminar)
+ 10. Abre terminal NA PASTA Projeto-Final-Eu → python Codes\Setup\setup.py
+ 11. Abre terminal NA PASTA Projeto-Final-Eu → python criar_atalho.py
      → Fica um ícone "OP Report Manager" no ambiente de trabalho
 
 Para utilizar o sistema no dia a dia, consulta o ficheiro "manual de utilização.txt".

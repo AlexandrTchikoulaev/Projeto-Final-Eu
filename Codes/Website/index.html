@@ -1606,9 +1606,14 @@
   <div class="page-header">
     <div>
       <label style="font-size:0.78rem;font-weight:500;color:var(--text-secondary);letter-spacing:0.03em;display:block;margin-bottom:0.45rem;">Relatório</label>
-      <select id="dash-report-select" onchange="onDashReportChange()" style="min-width:300px;">
-        <option value="">— Seleciona um relatório —</option>
-      </select>
+      <div class="chk-dropdown" id="dash-rep-dropdown" style="min-width:300px;">
+        <button type="button" class="chk-dropdown-toggle" id="dash-rep-dropdown-toggle" onclick="toggleDashRepDropdown()">
+          <span id="dash-rep-dropdown-label">— Seleciona um relatório —</span>
+          <span>▾</span>
+        </button>
+        <div class="chk-dropdown-menu" id="dash-rep-dropdown-menu" style="display:none;"></div>
+      </div>
+      <input type="hidden" id="dash-report-select"/>
     </div>
     <div style="display:flex;align-items:center;gap:1rem;">
       <span id="dash-data-text" style="font-size:0.73rem;color:var(--text-muted);opacity:0.75;"></span>
@@ -2341,8 +2346,18 @@
       loadTable(activeTab);
     }
     if (name === 'insert') { loadExtractFunctions(); loadReportDropdown(); }
-    if (name === 'chat') loadEtlData();
-    if (name === 'dash') { initDashboard(); loadEtlData(); }
+    if (name === 'chat') {
+      loadEtlData();
+      const isRel = document.getElementById('ctog-relatorios').classList.contains('active');
+      const box = document.getElementById(isRel ? 'chat-messages' : 'chat-messages-dados');
+      if (box) requestAnimationFrame(() => { box.scrollTop = box.scrollHeight; });
+    }
+    if (name === 'dash') {
+      const contentVisible = document.getElementById('dash-content').style.display !== 'none';
+      if (!contentVisible) initDashboard();
+      else _refreshDashReportMenu();
+      loadEtlData();
+    }
     if (name === 'etl') {
       loadEtlData();
       const activeEtlTab = document.getElementById('etog-dados').classList.contains('active') ? 'dados' : 'pdfs';
@@ -2465,6 +2480,12 @@
     if (repJsonDd && !repJsonDd.contains(e.target)) {
       document.getElementById('rep-json-dropdown-menu').style.display = 'none';
       const t = document.getElementById('rep-json-dropdown-toggle');
+      if (t) t.classList.remove('open');
+    }
+    const dashRepDd = document.getElementById('dash-rep-dropdown');
+    if (dashRepDd && !dashRepDd.contains(e.target)) {
+      document.getElementById('dash-rep-dropdown-menu').style.display = 'none';
+      const t = document.getElementById('dash-rep-dropdown-toggle');
       if (t) t.classList.remove('open');
     }
   });
@@ -3199,21 +3220,24 @@
   let dashListenersAdded = false;
 
   async function initDashboard() {
-    const repSel = document.getElementById('dash-report-select');
-    const savedVal = repSel.value;
-    repSel.innerHTML = '<option value="">— Seleciona um relatório —</option>';
+    const savedVal = document.getElementById('dash-report-select').value;
+    const menu = document.getElementById('dash-rep-dropdown-menu');
     try {
       const res = await fetch(ENDPOINT_DASH_REPORTS);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const reports = await res.json();
-      reports.forEach(r => {
-        const opt = document.createElement('option');
-        opt.value = r.report_id;
-        opt.textContent = `[${r.report_id}] ${r.file_name}`;
-        repSel.appendChild(opt);
-      });
-      if (savedVal) repSel.value = savedVal;
-      if (repSel.value) onDashReportChange();
+      menu.innerHTML = reports.map(r => `
+        <div class="rep-dropdown-item" onclick="selectDashReport(${r.report_id},'${_escHtml(r.file_name)}')">
+          <span>${_escHtml(r.file_name)}</span>
+          <span class="rep-src">${_escHtml(r.source_code || '')}</span>
+        </div>`).join('');
+      if (savedVal) {
+        const saved = reports.find(r => String(r.report_id) === String(savedVal));
+        if (saved) {
+          document.getElementById('dash-rep-dropdown-label').textContent = saved.file_name;
+          onDashReportChange();
+        }
+      }
     } catch (e) {
       showToast(`Erro ao carregar relatórios: ${e.message}`, 'error');
     }
@@ -4615,6 +4639,34 @@
     document.getElementById('rep-json-dropdown-label').textContent = name;
     document.getElementById('rep-json-dropdown-menu').style.display = 'none';
     document.getElementById('rep-json-dropdown-toggle').classList.remove('open');
+  }
+
+  function toggleDashRepDropdown() {
+    const menu   = document.getElementById('dash-rep-dropdown-menu');
+    const toggle = document.getElementById('dash-rep-dropdown-toggle');
+    const isOpen = menu.style.display !== 'none';
+    menu.style.display = isOpen ? 'none' : 'block';
+    toggle.classList.toggle('open', !isOpen);
+  }
+  function selectDashReport(id, name) {
+    document.getElementById('dash-report-select').value = id;
+    document.getElementById('dash-rep-dropdown-label').textContent = name;
+    document.getElementById('dash-rep-dropdown-menu').style.display = 'none';
+    document.getElementById('dash-rep-dropdown-toggle').classList.remove('open');
+    onDashReportChange();
+  }
+  async function _refreshDashReportMenu() {
+    const menu = document.getElementById('dash-rep-dropdown-menu');
+    try {
+      const res = await fetch(ENDPOINT_DASH_REPORTS);
+      if (!res.ok) return;
+      const reports = await res.json();
+      menu.innerHTML = reports.map(r => `
+        <div class="rep-dropdown-item" onclick="selectDashReport(${r.report_id},'${_escHtml(r.file_name)}')">
+          <span>${_escHtml(r.file_name)}</span>
+          <span class="rep-src">${_escHtml(r.source_code || '')}</span>
+        </div>`).join('');
+    } catch (e) { console.error(e); }
   }
 
   async function _fillReportDropdown(sel) {

@@ -228,8 +228,8 @@ _EXISTENCE_SIGNALS = [
     r"\bcontém\b",    r"\bcontem\b",
 ]
 
-_YEAR_RE       = re.compile(r"\b(19|20)\d{2}\b")
-_MULTI_YEAR_RE = re.compile(r"\b(19|20)\d{2}\b.*\b(19|20)\d{2}\b")
+_YEAR_RE       = re.compile(r"\b(?:19|20)\d{2}\b")
+_MULTI_YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b.*\b(?:19|20)\d{2}\b")
 
 
 def _classify(question: str) -> tuple[str, str]:
@@ -425,11 +425,16 @@ def _explain_sql(sql: str) -> None:
 
 # ── Fallback: build SQL purely from extracted entities ──────────────────────
 def _fallback_sql(question: str, tier: str) -> str:
-    anos = _YEAR_RE.findall(question)
+    # When a "Contexto anterior:" prefix is present, extract entities only from
+    # the new part of the question so old context doesn't pollute entity detection.
+    m_ctx = re.search(r'Contexto anterior:.*?"\.\s+', question)
+    q_for_entities = question[m_ctx.end():] if m_ctx else question
+
+    anos = _YEAR_RE.findall(q_for_entities)
     year = anos[0] if anos else (str(_cache["max_year"]) if _cache["max_year"] else None)
 
-    _, ind_name = _fuzzy_indicator(question)
-    country = _extract_country(question)
+    _, ind_name = _fuzzy_indicator(q_for_entities)
+    country = _extract_country(q_for_entities)
 
     # Detect top-N intent
     top_m = re.search(r"\btop\s*(\d+)\b", question.lower())
@@ -460,7 +465,7 @@ def _fallback_sql(question: str, tier: str) -> str:
     # Top-N ranking query (country optional)
     if top_n or any(w in question.lower() for w in _RANKING_WORDS):
         limit = top_n or 1
-        country_filter = f"AND country ILIKE '%{country}%'" if country else ""
+        country_filter = f"AND location_name ILIKE '%{country}%'" if country else ""
         year_filter = f"AND year = {year}" if year else ""
         return (
             f"SELECT location_name AS country, year, ranking, value FROM ("
@@ -619,9 +624,11 @@ def _naturalize_meta(sub: str, cols: list, rows: list) -> str:
 
 def _naturalize(question: str, tier: str, cols: list, rows: list) -> str:
     if not rows:
-        _, ind_name = _fuzzy_indicator(question)
-        country = _extract_country(question)
-        anos = _YEAR_RE.findall(question)
+        m_ctx = re.search(r'Contexto anterior:.*?"\.\s+', question)
+        q_hint = question[m_ctx.end():] if m_ctx else question
+        _, ind_name = _fuzzy_indicator(q_hint)
+        country = _extract_country(q_hint)
+        anos = _YEAR_RE.findall(q_hint)
         hint_parts = []
         if ind_name:
             hint_parts.append(f"indicador \"{ind_name}\"")
