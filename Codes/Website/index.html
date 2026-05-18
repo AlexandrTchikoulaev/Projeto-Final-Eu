@@ -2292,6 +2292,10 @@
 </div>
 
 <div id="toast"></div>
+<div id="pipeline-dados-indicator" style="display:none;position:fixed;bottom:1.5rem;right:1.5rem;z-index:999;background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:0.35rem 0.8rem;font-size:0.76rem;color:var(--text-muted);align-items:center;gap:0.5rem;box-shadow:0 2px 8px rgba(0,0,0,0.15);">
+  <div class="spinner" style="width:11px;height:11px;border-width:1.5px;flex-shrink:0;"></div>
+  A processar dados...
+</div>
 
 <script>
   const API_BASE              = 'http://localhost:8000';
@@ -2390,6 +2394,51 @@
     t.className = `show ${type}`;
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => t.classList.remove('show'), 3500);
+  }
+
+  // ── PIPELINE DE DADOS — indicador de estado ──
+  let _dadosPollId = null;
+
+  function _setPipelineDadosRunning(running) {
+    const ind = document.getElementById('pipeline-dados-indicator');
+    if (ind) ind.style.display = running ? 'flex' : 'none';
+    const btnDash = document.getElementById('btn-update-dash');
+    if (btnDash) {
+      if (running) {
+        btnDash.dataset.origText = btnDash.dataset.origText || btnDash.textContent;
+        btnDash.textContent = 'A processar...';
+        btnDash.disabled = true;
+      } else {
+        btnDash.textContent = btnDash.dataset.origText || 'Atualizar dados';
+        btnDash.disabled = false;
+      }
+    }
+  }
+
+  function _watchDadosPipeline() {
+    if (_dadosPollId !== null) return;
+    _setPipelineDadosRunning(true);
+    let seenRunning = false;
+    let elapsed = 0;
+    _dadosPollId = setInterval(async () => {
+      elapsed += 2;
+      try {
+        const res = await fetch(`${API_BASE}/etl/status/dados`);
+        if (!res.ok) return;
+        const { running, pending } = await res.json();
+        if (running || pending) seenRunning = true;
+        if (!running && !pending && (seenRunning || elapsed >= 8)) {
+          clearInterval(_dadosPollId);
+          _dadosPollId = null;
+          _setPipelineDadosRunning(false);
+          if (seenRunning) {
+            showToast('Dados atualizados com sucesso.');
+            _refreshDashReportMenu().catch(() => {});
+            updateDashDataText();
+          }
+        }
+      } catch (_) {}
+    }, 2000);
   }
 
   // ── FORM: OP_REPORT ──
@@ -2692,6 +2741,7 @@
         throw new Error(err.detail || `HTTP ${res.status}`);
       }
       showToast('Dados inseridos com sucesso.');
+      _watchDadosPipeline();
       clearDataForm();
     } catch (e) { showToast(e.message, 'error'); }
     finally { btn.disabled = false; btn.textContent = 'Adicionar Ficheiro'; }
@@ -4464,6 +4514,7 @@
       }
       const n = fnList.length;
       showToast(n > 1 ? `${n} registos inseridos com sucesso.` : 'Dados inseridos com sucesso.');
+      _watchDadosPipeline();
       clearDataForm();
     } catch (e) { showToast(e.message, 'error'); }
     finally { btn.disabled = false; btn.textContent = 'Adicionar Ficheiro'; }
@@ -4759,6 +4810,7 @@
       if (!res.ok) throw new Error((await res.json()).detail || `HTTP ${res.status}`);
       const data = await res.json();
       showToast(data.message);
+      _watchDadosPipeline();
       fileInput.value = '';
       document.querySelectorAll('#fn-dropdown-menu input[type="checkbox"]').forEach(c => c.checked = false);
       updateFnDropdownLabel();
@@ -4804,6 +4856,7 @@
       } else {
         showToast(`${data.inserted} inseridos, ${data.errors.length} erros.`, 'error');
       }
+      if (data.inserted > 0) _watchDadosPipeline();
       document.getElementById('d-batch-json').value = '';
     } catch (e) { showToast(e.message, 'error'); }
     finally { btn.disabled = false; btn.textContent = 'Importar Lote'; }

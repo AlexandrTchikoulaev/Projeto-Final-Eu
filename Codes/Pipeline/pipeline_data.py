@@ -11,7 +11,7 @@ Executa sequencialmente:
 import sys
 import os
 import psycopg2
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Permitir imports diretos dos módulos na mesma pasta
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -27,13 +27,13 @@ DB_CONFIG = {
 PROCESS_NAME = "etl_dados"
 
 
-def update_timestamp():
+def update_timestamp(run_start):
     conn = psycopg2.connect(**DB_CONFIG)
     cur = conn.cursor()
     cur.execute("""
-        UPDATE etl_data SET last_run = CURRENT_TIMESTAMP
+        UPDATE etl_data SET last_run = %s
         WHERE process_name = %s
-    """, (PROCESS_NAME,))
+    """, (run_start, PROCESS_NAME))
     conn.commit()
     cur.close()
     conn.close()
@@ -75,8 +75,15 @@ def run_pipeline():
     import gold
     import pipeline_data_report
 
-    run_start    = datetime.now()
+    run_start     = datetime.now(timezone.utc)
     prev_last_run = get_prev_last_run()
+
+    # Crash recovery: reset PROCESSING → PENDING (ficheiros que ficaram a meio num crash anterior)
+    conn_reset = psycopg2.connect(**DB_CONFIG)
+    cur_reset = conn_reset.cursor()
+    cur_reset.execute("UPDATE op_data SET pipeline_status = 'PENDING' WHERE pipeline_status = 'PROCESSING'")
+    conn_reset.commit()
+    cur_reset.close(); conn_reset.close()
 
     print("\n PIPELINE DE DADOS INICIADO")
     print(f" {run_start.strftime('%Y-%m-%d %H:%M:%S')}\n")
@@ -105,7 +112,7 @@ def run_pipeline():
         print("\n PIPELINE DE DADOS CONCLUÍDO COM SUCESSO")
 
     finally:
-        update_timestamp()
+        update_timestamp(run_start)
         try:
             pipeline_data_report.generate(prev_last_run, run_start, success)
         except Exception as e:

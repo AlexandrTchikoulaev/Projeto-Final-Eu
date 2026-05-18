@@ -5,7 +5,7 @@ __pycache__/
 *.pdf
 
 # Docker / MinIO
-docker/minio-data/
+Docker/minio-data/
 
 # VS Code
 .vscode/
@@ -21,3 +21,11 @@ venv/
 # Dados e relatórios gerados
 Dados/
 Reports/
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# Bases de dados locais
+*.db
+*.sqlite

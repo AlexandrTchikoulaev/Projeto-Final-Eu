@@ -47,9 +47,33 @@ def main():
         file_name        VARCHAR,
         extract_function TEXT,
         created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        pipeline_status  TEXT NOT NULL DEFAULT 'PENDING',
+        pipeline_error   TEXT,
         CONSTRAINT fk_report
             FOREIGN KEY(report_id) REFERENCES op_report(report_id) ON DELETE CASCADE
     );
+    """)
+
+    # -------------------------
+    # Trigger: atualizar updated_at em op_data
+    # -------------------------
+    cur.execute("""
+    CREATE OR REPLACE FUNCTION update_op_data_updated_at()
+    RETURNS TRIGGER AS $$
+    BEGIN
+        NEW.updated_at = CURRENT_TIMESTAMP;
+        RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+    """)
+
+    cur.execute("DROP TRIGGER IF EXISTS trg_op_data_updated_at ON op_data;")
+
+    cur.execute("""
+    CREATE TRIGGER trg_op_data_updated_at
+    BEFORE UPDATE ON op_data
+    FOR EACH ROW EXECUTE FUNCTION update_op_data_updated_at();
     """)
 
     # -------------------------

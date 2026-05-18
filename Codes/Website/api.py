@@ -45,6 +45,46 @@ PIPELINE_DADOS_SCRIPT  = os.path.normpath(os.path.join(_HERE, "..", "Pipeline", 
 PIPELINE_PDFS_SCRIPT   = os.path.normpath(os.path.join(_HERE, "..", "Pipeline Unstructured", "pipeline_reports.py"))
 RESET_PIPELINE_SCRIPT  = os.path.normpath(os.path.join(_HERE, "..", "..", "Extra", "Codes", "reset_pipeline.py"))
 
+# ── Estado da pipeline de dados ───────────────────────────
+_dados_state_lock = threading.Lock()
+_dados_running    = False
+_dados_pending    = False
+
+
+def _run_dados_loop():
+    """Worker em background: corre pipeline_data.py; repete se ficou execução pendente."""
+    global _dados_running, _dados_pending
+    script_dir = os.path.dirname(PIPELINE_DADOS_SCRIPT)
+    while True:
+        try:
+            subprocess.run(
+                [sys.executable, PIPELINE_DADOS_SCRIPT],
+                cwd=script_dir,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        except Exception:
+            pass
+        with _dados_state_lock:
+            if _dados_pending:
+                _dados_pending = False
+            else:
+                _dados_running = False
+                break
+
+
+def notify_pipeline_dados():
+    """Dispara a pipeline de dados em background após uma inserção.
+    Se já estiver a correr, marca como pendente para reexecutar ao terminar."""
+    global _dados_running, _dados_pending
+    with _dados_state_lock:
+        if _dados_running:
+            _dados_pending = True
+            return
+        _dados_running = True
+    threading.Thread(target=_run_dados_loop, daemon=True).start()
+
 
 # ── Helpers ───────────────────────────────────────────────
 def _connect(cfg: dict):
@@ -336,6 +376,7 @@ def add_op_data(data: OpDataIn):
         conn.commit()
         cur.close()
         conn.close()
+        notify_pipeline_dados()
         return {"file_id": file_id, "message": "Ficheiro inserido com sucesso."}
     except HTTPException:
         raise
@@ -400,6 +441,7 @@ async def upload_op_data(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao guardar no MinIO: {e}")
 
+    notify_pipeline_dados()
     return {"file_id": file_id, "message": "Ficheiro carregado e registado com sucesso."}
 
 
@@ -462,6 +504,7 @@ async def upload_op_data_pairs(
 
     cur.close()
     conn.close()
+    notify_pipeline_dados()
     n_files, n_fns = len(file_data), len(functions)
     return {"file_ids": created_ids, "message": f"{len(created_ids)} registos criados ({n_files} ficheiro(s) × {n_fns} função(ões))."}
 
@@ -501,6 +544,8 @@ async def batch_op_data(payload: list[dict]):
     conn.commit()
     cur.close()
     conn.close()
+    if inserted > 0:
+        notify_pipeline_dados()
     return {"inserted": inserted, "errors": errors}
 
 
@@ -685,17 +730,11 @@ def get_op_data():
                    d.extract_function, r.source_code, d.file_name, d.created_at,
                    r.file_name AS report_name,
                    CASE
-                     WHEN ed.last_run IS NULL      THEN TRUE
-                     WHEN d.created_at > ed.last_run THEN TRUE
-                     WHEN EXISTS (
-                       SELECT 1 FROM etl_logs_dados eld
-                       WHERE eld.file_id = d.file_id::text
-                     )                             THEN TRUE
+                     WHEN d.pipeline_status IN ('PENDING', 'FAILED') THEN TRUE
                      ELSE FALSE
                    END AS can_delete
             FROM op_data d
             LEFT JOIN op_report r  ON r.report_id  = d.report_id
-            LEFT JOIN etl_data  ed ON ed.process_name = 'etl_dados'
             ORDER BY d.file_id DESC;
         """)
         rows = cur.fetchall()
@@ -740,7 +779,9 @@ def patch_op_data_simple(file_id: int, data: OpDataSimplePatch):
             UPDATE op_data
             SET file_name        = COALESCE(%s, file_name),
                 extract_function = COALESCE(%s, extract_function),
-                created_at       = CURRENT_TIMESTAMP
+                created_at       = CURRENT_TIMESTAMP,
+                pipeline_status  = 'PENDING',
+                pipeline_error   = NULL
             WHERE file_id = %s
             RETURNING file_id
         """, (data.file_name or None, data.extract_function or None, file_id))
@@ -771,7 +812,9 @@ def patch_op_data(file_id: int, data: OpDataPatch):
                 file_url         = %s,
                 file_name        = COALESCE(%s, file_name),
                 extract_function = %s,
-                created_at       = CURRENT_TIMESTAMP
+                created_at       = CURRENT_TIMESTAMP,
+                pipeline_status  = 'PENDING',
+                pipeline_error   = NULL
             WHERE file_id = %s
             RETURNING report_id, file_url, extract_function, created_at
         """, (data.report_id, data.file_url or None, data.file_name or None, data.extract_function or None, file_id))
@@ -922,24 +965,18 @@ def delete_op_data(file_id: int):
         conn = get_operational_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-        cur.execute("SELECT file_id, created_at FROM op_data WHERE file_id = %s", (file_id,))
+        cur.execute("SELECT file_id, pipeline_status FROM op_data WHERE file_id = %s", (file_id,))
         file_row = cur.fetchone()
         if not file_row:
             cur.close(); conn.close()
             raise HTTPException(status_code=404, detail=f"file_id {file_id} não encontrado.")
 
-        cur.execute("SELECT last_run FROM etl_data WHERE process_name = 'etl_dados'")
-        etl_row = cur.fetchone()
-        dados_last = etl_row["last_run"] if etl_row else None
-
-        if dados_last and file_row["created_at"] and file_row["created_at"] <= dados_last:
-            cur.execute("SELECT 1 FROM etl_logs_dados WHERE file_id = %s LIMIT 1", (str(file_id),))
-            if not cur.fetchone():
-                cur.close(); conn.close()
-                raise HTTPException(
-                    status_code=409,
-                    detail="Este ficheiro já foi processado e inserido no DW. Não pode ser apagado diretamente."
-                )
+        if file_row["pipeline_status"] not in ("PENDING", "FAILED"):
+            cur.close(); conn.close()
+            raise HTTPException(
+                status_code=409,
+                detail="Este ficheiro já foi processado e inserido no DW. Não pode ser apagado diretamente."
+            )
 
         cur.execute("DELETE FROM op_data WHERE file_id = %s", (file_id,))
         cur.execute("DELETE FROM etl_logs_dados WHERE file_id = %s", (str(file_id),))
@@ -1331,12 +1368,60 @@ def shutdown():
 
 @app.post("/etl/run")
 def etl_run():
-    return _stream_script(PIPELINE_DADOS_SCRIPT)
+    return etl_run_dados()
 
 
 @app.post("/etl/run/dados")
 def etl_run_dados():
-    return _stream_script(PIPELINE_DADOS_SCRIPT)
+    global _dados_running, _dados_pending
+
+    with _dados_state_lock:
+        if _dados_running:
+            _dados_pending = True
+            def _already():
+                yield "Pipeline de dados já está a correr — será reexecutada ao terminar.\n✓\n"
+            return StreamingResponse(_already(), media_type="text/plain")
+        _dados_running = True
+
+    script_name = os.path.basename(PIPELINE_DADOS_SCRIPT)
+    script_dir  = os.path.dirname(PIPELINE_DADOS_SCRIPT)
+
+    def _stream():
+        global _dados_running, _dados_pending
+        yield f"A iniciar {script_name}...\n"
+        try:
+            proc = subprocess.Popen(
+                [sys.executable, PIPELINE_DADOS_SCRIPT],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, bufsize=1, cwd=script_dir,
+            )
+            for line in proc.stdout:
+                yield line
+            proc.wait()
+            if proc.returncode == 0:
+                yield f"\n✓ {script_name} concluído com sucesso.\n"
+            else:
+                yield f"\n✗ {script_name} terminou com erro (código {proc.returncode}).\n"
+        except Exception as e:
+            yield f"\n✗ Erro: {e}\n"
+        finally:
+            start_bg = False
+            with _dados_state_lock:
+                if _dados_pending:
+                    _dados_pending = False
+                    start_bg = True
+                else:
+                    _dados_running = False
+            if start_bg:
+                threading.Thread(target=_run_dados_loop, daemon=True).start()
+
+    return StreamingResponse(_stream(), media_type="text/plain")
+
+
+@app.get("/etl/status/dados")
+def etl_status_dados():
+    with _dados_state_lock:
+        return {"running": _dados_running, "pending": _dados_pending}
 
 
 @app.post("/etl/run/pdfs")

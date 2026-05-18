@@ -1,11 +1,10 @@
 """
 Gerador de relatório detalhado da última execução da pipeline de dados.
-Chamado pelo pipeline_dados.py no final de cada execução.
+Chamado pelo pipeline_data.py no final de cada execução.
 """
 import os
 import psycopg2
 import psycopg2.extras
-import boto3
 from datetime import datetime
 
 DB_PIPELINE = {
@@ -20,32 +19,14 @@ DB_WAREHOUSE = {
     "host": "localhost", "port": 5433, "dbname": "warehouse_db",
     "user": "projeto_utilizador", "password": "projeto",
 }
-MINIO_CONFIG = {
-    "endpoint_url": "http://localhost:9002",
-    "aws_access_key_id": "admin",
-    "aws_secret_access_key": "admin123",
-}
 
-REPORT_PATH = os.path.join(
+REPORTS_DIR = os.path.normpath(os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
-    "..", "..", "Reports",
-    "pipeline_data_report.txt"
-)
+    "..", "..", "Reports", "Data"
+))
 
 SEP  = "=" * 72
 DASH = "-" * 72
-
-
-def _minio_keys(s3, bucket):
-    keys = set()
-    try:
-        pag = s3.get_paginator("list_objects_v2")
-        for page in pag.paginate(Bucket=bucket):
-            for obj in page.get("Contents", []):
-                keys.add(obj["Key"])
-    except Exception:
-        pass
-    return keys
 
 
 def generate(prev_last_run, run_start: datetime, success: bool):
@@ -56,7 +37,6 @@ def generate(prev_last_run, run_start: datetime, success: bool):
     start_str = run_start.strftime("%Y-%m-%d %H:%M:%S")
     prev_str  = prev_last_run.strftime("%Y-%m-%d %H:%M:%S") if prev_last_run else "nunca executado"
 
-    # ── Conexões ──────────────────────────────────────────────────────────
     conn_pipe = psycopg2.connect(**DB_PIPELINE)
     cur_pipe  = conn_pipe.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     conn_op   = psycopg2.connect(**DB_OPERATIONAL)
@@ -64,37 +44,30 @@ def generate(prev_last_run, run_start: datetime, success: bool):
     conn_dw   = psycopg2.connect(**DB_WAREHOUSE)
     cur_dw    = conn_dw.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-    try:
-        s3 = boto3.client("s3", **MINIO_CONFIG)
-    except Exception:
-        s3 = None
-
-    # ── Candidatos ────────────────────────────────────────────────────────
+    # ── Candidatos (ficheiros novos desde a última run) ────────────────────
     if prev_last_run:
         cur_op.execute("""
             SELECT d.file_id, d.report_id, d.file_url, d.extract_function,
-                   d.created_at,
+                   d.created_at, d.pipeline_status, d.pipeline_error,
                    r.file_name AS report_name, r.source_code
             FROM op_data d
             LEFT JOIN op_report r ON r.report_id = d.report_id
-            WHERE d.created_at > %s
+            WHERE d.created_at > %s OR d.updated_at > %s
             ORDER BY d.file_id
-        """, (prev_last_run,))
+        """, (prev_last_run, prev_last_run))
     else:
         cur_op.execute("""
             SELECT d.file_id, d.report_id, d.file_url, d.extract_function,
-                   d.created_at,
+                   d.created_at, d.pipeline_status, d.pipeline_error,
                    r.file_name AS report_name, r.source_code
             FROM op_data d
             LEFT JOIN op_report r ON r.report_id = d.report_id
+            WHERE d.pipeline_status != 'PENDING'
             ORDER BY d.file_id
         """)
     candidates = cur_op.fetchall()
 
     # ── Logs desta execução ────────────────────────────────────────────────
-    # Usa prev_last_run (timestamp do PostgreSQL, UTC) como lower bound para
-    # evitar desfasamento com datetime.now() (hora local). Na primeira run
-    # (prev_last_run=None) mostra todos os logs.
     if prev_last_run is not None:
         cur_pipe.execute("""
             SELECT file_id, file_name, step, error_message, log_time
@@ -110,7 +83,6 @@ def generate(prev_last_run, run_start: datetime, success: bool):
         """)
     run_logs = cur_pipe.fetchall()
 
-    # Organizar por step e por file_id
     by_step = {}
     for lg in run_logs:
         by_step.setdefault(lg["step"], []).append(lg)
@@ -124,18 +96,16 @@ def generate(prev_last_run, run_start: datetime, success: bool):
     def errs(step):
         return {_norm_fid(lg["file_id"]): lg["error_message"] for lg in by_step.get(step, [])}
 
-    invalid_opdata  = errs("validate_opdata")
-    ingest_errs     = errs("ingest_raw")
-    bronze_errs     = errs("validate_bronze")
-    transform_errs  = errs("transform")
-    silver_errs     = errs("validate_silver")
-    load_errs_list  = by_step.get("load", []) + by_step.get("load_mapping", [])
+    invalid_opdata = errs("validate_opdata")
+    ingest_errs    = errs("ingest_raw")
+    bronze_errs    = errs("validate_bronze")
+    transform_errs = errs("transform")
+    silver_errs    = errs("validate_silver")
+    load_errs_list = by_step.get("load", []) + by_step.get("load_mapping", [])
 
-    candidate_ids = {r["file_id"] for r in candidates}
-
-    # ── MinIO ─────────────────────────────────────────────────────────────
-    bronze_keys = _minio_keys(s3, "bronze") if s3 else set()
-    silver_keys = _minio_keys(s3, "silver") if s3 else set()
+    # status_map: {file_id: pipeline_status}
+    status_map = {r["file_id"]: r["pipeline_status"] for r in candidates}
+    error_map  = {r["file_id"]: r["pipeline_error"]  for r in candidates}
 
     # ── fact_values + dimensões ────────────────────────────────────────────
     rids = list({r["report_id"] for r in candidates if r["report_id"]})
@@ -191,62 +161,45 @@ def generate(prev_last_run, run_start: datetime, success: bool):
     w(SEP)
     w("")
 
-    # ── Contagens derivadas para o RESUMO ─────────────────────────────────
-    # Ficheiros cujo parquet não existe no Silver (erro silencioso ou timezone)
-    transform_missing = {
-        r["file_id"] for r in candidates
-        if r["file_id"] not in invalid_opdata
-        and r["file_id"] not in ingest_errs
-        and r["file_id"] not in bronze_errs
-        and r["file_id"] not in transform_errs
-        and f"{r['file_id']}.parquet" not in silver_keys
-    }
+    # ── Contagens para o RESUMO baseadas em pipeline_status ───────────────
+    s1_total   = len(candidates)
+    s1_invalid = len(invalid_opdata)
+    s1_valid   = s1_total - s1_invalid
 
-    # [1] validate_opdata
-    s1_total    = len(candidates)
-    s1_invalid  = len(invalid_opdata)
-    s1_valid    = s1_total - s1_invalid
+    valid_cands  = [r for r in candidates if r["file_id"] not in invalid_opdata]
+    s2_url       = sum(1 for r in valid_cands if r["file_url"])
+    s2_upload    = sum(1 for r in valid_cands if not r["file_url"])
+    s2_url_ok    = s2_url - len(ingest_errs)
+    s2_url_err   = len(ingest_errs)
+    s2_ok        = s2_url_ok + s2_upload
 
-    # [2] ingest_raw (bronze)
-    valid_cands   = [r for r in candidates if r["file_id"] not in invalid_opdata]
-    s2_url        = sum(1 for r in valid_cands if r["file_url"])
-    s2_upload     = sum(1 for r in valid_cands if not r["file_url"])
-    s2_url_ok     = s2_url - len(ingest_errs)
-    s2_url_err    = len(ingest_errs)
-    s2_total_bronze = s2_url_ok + s2_upload   # ficheiros que chegaram ao Bronze
+    s3_invalid = len(bronze_errs)
+    s3_valid   = s2_ok - s3_invalid
 
-    # [3] validate_bronze
-    s3_total    = s2_total_bronze
-    s3_invalid  = len(bronze_errs)
-    s3_valid    = s3_total - s3_invalid
+    s4_ok  = sum(1 for r in candidates if r["pipeline_status"] in ("SILVER_OK", "DONE"))
+    s4_err = sum(1 for r in candidates if r["pipeline_status"] == "FAILED" and r["file_id"] in transform_errs)
+    s4_err += sum(1 for r in candidates
+                  if r["pipeline_status"] == "FAILED"
+                  and r["file_id"] not in transform_errs
+                  and r["file_id"] not in invalid_opdata
+                  and r["file_id"] not in ingest_errs
+                  and r["file_id"] not in bronze_errs)
 
-    # [4] transform (silver)
-    s4_total    = s3_valid
-    s4_err_log  = len(transform_errs)
-    s4_err_miss = len(transform_missing)
-    s4_err      = s4_err_log + s4_err_miss
-    s4_ok       = s4_total - s4_err
+    s5_invalid = len(silver_errs)
+    s5_valid   = s4_ok - s5_invalid
 
-    # [5] validate_silver
-    s5_total    = s4_ok
-    s5_invalid  = len(silver_errs)
-    s5_valid    = s5_total - s5_invalid
-
-    # [6] gold
-    s6_errs     = len(load_errs_list)
-
-    s2_ok = s2_url_ok + s2_upload
+    s6_done  = sum(1 for r in candidates if r["pipeline_status"] == "DONE")
+    s6_errs  = len(load_errs_list)
 
     w(DASH)
     w("RESUMO")
     w(DASH)
     w(f"[1] validate_opdata      Novos: {s1_total:<4}  Válidos: {s1_valid:<4}  Inválidos: {s1_invalid:<4}  → etl_logs: {s1_invalid}")
     w(f"[2] Ingestão Bronze      Processados: {s1_valid:<4}  OK: {s2_ok:<4}  Erro: {s2_url_err:<4}  → etl_logs: {s2_url_err}")
-    w(f"[3] Validação Bronze     Validados: {s3_total:<4}  OK: {s3_valid:<4}  Inválidos: {s3_invalid:<4}  → etl_logs: {s3_invalid}")
-    w(f"[4] Transformação Silver Processados: {s4_total:<4}  OK: {s4_ok:<4}  Erro: {s4_err:<4}  → etl_logs: {s4_err_log}" +
-      (f"  (+ {s4_err_miss} sem registo)" if s4_err_miss else ""))
-    w(f"[5] Validação Silver     Validados: {s5_total:<4}  OK: {s5_valid:<4}  Inválidos: {s5_invalid:<4}  → etl_logs: {s5_invalid}")
-    w(f"[6] Warehouse (gold)     dim_report: {dim_report_run}  dim_location: {dim_location_total}  "
+    w(f"[3] Validação Bronze     Validados: {s2_ok:<4}  OK: {s3_valid:<4}  Inválidos: {s3_invalid:<4}  → etl_logs: {s3_invalid}")
+    w(f"[4] Transformação Silver OK (SILVER_OK/DONE): {s4_ok:<4}  Erro: {s4_err:<4}  → etl_logs: {len(transform_errs)}")
+    w(f"[5] Validação Silver     OK: {s5_valid:<4}  Inválidos: {s5_invalid:<4}  → etl_logs: {s5_invalid}")
+    w(f"[6] Warehouse (gold)     DONE: {s6_done:<4}  dim_report: {dim_report_run}  dim_location: {dim_location_total}  "
       f"dim_indicator: {dim_indicator_total}  fact_values: {total_facts}  Erros: {s6_errs}")
     w("")
 
@@ -260,10 +213,9 @@ def generate(prev_last_run, run_start: datetime, success: bool):
         w("  Sem ficheiros novos para validar.")
     else:
         for r in candidates:
-            fid = r["file_id"]
+            fid   = r["file_id"]
             label = f"[{r['source_code']}] {r['report_name']}" if r["report_name"] else f"report_id={r['report_id']}"
-            fn  = r["extract_function"] or "—"
-            url = (r["file_url"] or "upload direto")
+            fn    = r["extract_function"] or "—"
             if fid in invalid_opdata:
                 w(f"  INVALIDO  file_id={fid}  {label}")
                 w(f"            fn={fn}")
@@ -292,9 +244,7 @@ def generate(prev_last_run, run_start: datetime, success: bool):
                 w(f"  ERRO      file_id={fid}  URL={url}")
                 w(f"            Erro: {ingest_errs[fid]}")
             else:
-                no_bronze = str(fid) not in bronze_keys
-                nota = "  [ATENCAO: nao encontrado no bucket Bronze]" if no_bronze else ""
-                w(f"  OK        file_id={fid}  URL={url}{nota}")
+                w(f"  OK        file_id={fid}  URL={url}")
     w("")
 
     # ══════════════════════════════════════════════════════════════════════
@@ -332,16 +282,21 @@ def generate(prev_last_run, run_start: datetime, success: bool):
         w("  Nenhum ficheiro chegou a esta fase.")
     else:
         for r in to_transform:
-            fid = r["file_id"]
-            fn  = r["extract_function"] or "—"
+            fid    = r["file_id"]
+            fn     = r["extract_function"] or "—"
+            status = status_map.get(fid, "PENDING")
             silver_key = f"{fid}.parquet"
             if fid in transform_errs:
                 w(f"  ERRO      file_id={fid}  fn={fn}")
                 w(f"            Erro: {transform_errs[fid]}")
-            elif fid in transform_missing:
-                w(f"  ERRO      file_id={fid}  fn={fn}  -> {silver_key}  [parquet nao criado no Silver]")
-            else:
+            elif status in ("SILVER_OK", "DONE"):
                 w(f"  OK        file_id={fid}  fn={fn}  -> {silver_key}")
+            elif status == "FAILED":
+                pipeline_err = error_map.get(fid) or "—"
+                w(f"  FAILED    file_id={fid}  fn={fn}")
+                w(f"            Erro: {pipeline_err}")
+            else:
+                w(f"  {status:<9} file_id={fid}  fn={fn}")
     w("")
 
     # ══════════════════════════════════════════════════════════════════════
@@ -351,8 +306,8 @@ def generate(prev_last_run, run_start: datetime, success: bool):
     w("5/6 — VALIDACAO Silver (validate_silver)")
     w(SEP)
     to_validate_silver = [r for r in to_transform
-                          if r["file_id"] not in transform_errs
-                          and r["file_id"] not in transform_missing]
+                          if status_map.get(r["file_id"], "PENDING") in ("SILVER_OK", "DONE")
+                          and r["file_id"] not in transform_errs]
     if not to_validate_silver:
         w("  Nenhum ficheiro chegou a esta fase.")
     else:
@@ -399,10 +354,10 @@ def generate(prev_last_run, run_start: datetime, success: bool):
         w(header)
         w("  " + "-" * 70)
         for lg in run_logs:
-            fid   = str(lg["file_id"]  or "—")
-            step  = str(lg["step"]     or "—")
-            lt    = str(lg["log_time"])[:19]
-            msg   = (lg["error_message"] or "")
+            fid  = str(lg["file_id"]  or "—")
+            step = str(lg["step"]     or "—")
+            lt   = str(lg["log_time"])[:19]
+            msg  = (lg["error_message"] or "")
             w(f"  {fid:<10} {step:<22} {lt:<22} {msg}")
     w("")
 
@@ -410,14 +365,13 @@ def generate(prev_last_run, run_start: datetime, success: bool):
     w("FIM DO RELATORIO")
     w(SEP)
 
-    # ── Fechar conexões ───────────────────────────────────────────────────
     cur_pipe.close(); conn_pipe.close()
     cur_op.close();   conn_op.close()
     cur_dw.close();   conn_dw.close()
 
-    # ── Escrever ficheiro ─────────────────────────────────────────────────
-    report_path = os.path.abspath(REPORT_PATH)
-    os.makedirs(os.path.dirname(report_path), exist_ok=True)
+    timestamp = run_start.strftime("%Y%m%d_%H%M%S")
+    report_path = os.path.join(REPORTS_DIR, f"pipeline_data_report_{timestamp}.txt")
+    os.makedirs(REPORTS_DIR, exist_ok=True)
     with open(report_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
 

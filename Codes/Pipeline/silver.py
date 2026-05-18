@@ -1,19 +1,15 @@
 import json
 import io
+import os
 import pandas as pd
 import boto3
 import psycopg2
-from dateutil.parser import parse as parse_date
-from datetime import timezone
 
 from silver_functions import EXTRACT_FUNCTIONS, clean_dataframe
 
 DB_CONFIG = {
-    "host": "localhost",
-    "port": 5433,
-    "dbname": "gestao_db",
-    "user": "projeto_utilizador",
-    "password": "projeto",
+    "host": "localhost", "port": 5433, "dbname": "gestao_db",
+    "user": "projeto_utilizador", "password": "projeto",
 }
 
 MINIO_CONFIG = {
@@ -24,28 +20,28 @@ MINIO_CONFIG = {
 
 BUCKET_RAW    = "bronze"
 BUCKET_SILVER = "silver"
-PROCESS_NAME  = "etl_dados"
 
 
-def _log_error(file_id, step: str, message: str):
-    """Regista um erro em etl_logs_dados com conexão própria em autocommit.
+_FALLBACK_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "silver_errors_fallback.log")
 
-    Usar uma conexão separada garante que o log é persistido mesmo que a
-    transação principal faça rollback ou esteja em estado de erro.
-    """
+def _log_error(cur, conn, file_id, step: str, message: str):
+    """Regista um erro em etl_logs_dados na conexão principal."""
+    fid_str = str(file_id) if file_id is not None else None
     try:
-        _conn = psycopg2.connect(**DB_CONFIG)
-        _conn.autocommit = True
-        _cur = _conn.cursor()
-        _cur.execute(
-            "INSERT INTO etl_logs_dados (file_id, step, error_message) "
-            "VALUES (%s, %s, %s)",
-            (str(file_id) if file_id is not None else None, step, message),
+        cur.execute(
+            "INSERT INTO etl_logs_dados (file_id, step, error_message) VALUES (%s, %s, %s)",
+            (fid_str, step, message),
         )
-        _cur.close()
-        _conn.close()
     except Exception as log_exc:
-        print(f"[AVISO] Não foi possível registar erro no etl_logs: {log_exc}")
+        print(f"[ERRO-LOG] file_id={fid_str} step={step}: {message}")
+        print(f"[ERRO-LOG] Falha ao registar em etl_logs: {log_exc}")
+        try:
+            from datetime import datetime as _dt
+            with open(_FALLBACK_LOG, "a", encoding="utf-8") as _f:
+                _f.write(f"{_dt.now().isoformat()} | file_id={fid_str} step={step}: {message}\n")
+                _f.write(f"  DB error: {log_exc}\n")
+        except Exception:
+            pass
 
 
 def detect_format(content: bytes) -> str:
@@ -85,126 +81,97 @@ def transformar():
     except Exception:
         s3.create_bucket(Bucket=BUCKET_SILVER)
 
-    cur.execute("SELECT last_run FROM etl_data WHERE process_name = %s", (PROCESS_NAME,))
-    row      = cur.fetchone()
-    last_run = row[0] if row else None
+    cur.execute("""
+        SELECT file_id, extract_function, report_id, created_at
+        FROM op_data
+        WHERE pipeline_status = 'BRONZE_OK'
+        ORDER BY file_id
+        FOR UPDATE SKIP LOCKED
+    """)
+    rows = cur.fetchall()
 
-    # Conjunto de file_ids que deveriam chegar ao Silver nesta execução:
-    # novos ficheiros em op_data (após last_run) sem erros nas fases anteriores.
-    if last_run:
-        cur.execute("""
-            SELECT d.file_id FROM op_data d
-            WHERE d.extract_function IS NOT NULL AND d.extract_function != ''
-              AND d.created_at > %s
-              AND NOT EXISTS (
-                  SELECT 1 FROM etl_logs_dados l
-                  WHERE l.file_id = d.file_id::text
-                    AND l.step IN ('validate_opdata', 'ingest_raw', 'validate_bronze')
-              )
-        """, (last_run,))
-    else:
-        cur.execute("""
-            SELECT d.file_id FROM op_data d
-            WHERE d.extract_function IS NOT NULL AND d.extract_function != ''
-              AND NOT EXISTS (
-                  SELECT 1 FROM etl_logs_dados l
-                  WHERE l.file_id = d.file_id::text
-                    AND l.step IN ('validate_opdata', 'ingest_raw', 'validate_bronze')
-              )
-        """)
-    expected_ids = {str(r[0]) for r in cur.fetchall()}
+    if not rows:
+        print("Sem ficheiros BRONZE_OK para transformar.")
+        cur.close(); conn.close()
+        return
 
-    paginator = s3.get_paginator("list_objects_v2")
-    pages     = paginator.paginate(Bucket=BUCKET_RAW)
-
-    ok_count         = 0
-    err_count        = 0
-    found_in_bronze  = set()   # todos os keys vistos no bucket Bronze
-    processed_ids    = set()   # keys para os quais a transformação foi tentada
-
-    for page in pages:
-        for obj in page.get("Contents", []):
-            key = obj["Key"]
-            found_in_bronze.add(key)
-
-            try:
-                head     = s3.head_object(Bucket=BUCKET_RAW, Key=key)
-                metadata = head.get("Metadata", {})
-            except Exception as e:
-                print(f"[ERRO] Metadata de {key}: {e}")
-                _log_error(key, "transform", f"Não foi possível ler metadata do Bronze: {e}")
-                err_count += 1
-                continue
-
-            extract_function = metadata.get("extract_function", "")
-            created_at_str   = metadata.get("created_at", "")
-
-            # Filtro incremental por created_at da metadata
-            if last_run and created_at_str:
-                try:
-                    created_dt = parse_date(created_at_str)
-                    if created_dt.tzinfo is None:
-                        created_dt = created_dt.replace(tzinfo=timezone.utc)
-                    lr = last_run if last_run.tzinfo else last_run.replace(tzinfo=timezone.utc)
-                    if created_dt <= lr:
-                        continue
-                except Exception:
-                    pass
-
-            if not extract_function:
-                print(f"[ERRO] Sem extract_function: {key}")
-                _log_error(key, "transform", "Sem extract_function na metadata Bronze")
-                err_count += 1
-                continue
-
-            if extract_function not in EXTRACT_FUNCTIONS:
-                print(f"[ERRO] Função desconhecida '{extract_function}': {key}")
-                _log_error(key, "transform", f"Função desconhecida: {extract_function}")
-                err_count += 1
-                continue
-
-            print(f"A transformar: {key} ({extract_function})")
-            processed_ids.add(key)
-
-            try:
-                data  = read_raw_object(s3, key)
-                df    = EXTRACT_FUNCTIONS[extract_function](data)
-
-                if df is None or df.empty:
-                    raise ValueError("DataFrame vazio após transformação")
-
-                df = clean_dataframe(df)
-
-                buffer = io.BytesIO()
-                df.to_parquet(buffer, index=False)
-                buffer.seek(0)
-
-                s3.put_object(
-                    Bucket=BUCKET_SILVER,
-                    Key=f"{key}.parquet",
-                    Body=buffer.getvalue(),
-                    Metadata={
-                        "report_id":  metadata.get("report_id", ""),
-                        "created_at": metadata.get("created_at", ""),
-                    },
-                )
-                print(f"[OK]   {key} -> {key}.parquet")
-                ok_count += 1
-
-            except Exception as e:
-                print(f"[ERRO] {key}: {e}")
-                _log_error(key, "transform", str(e))
-                err_count += 1
-
-    # Detetar ficheiros esperados que não estavam no bucket Bronze de todo
-    missing_from_bronze = expected_ids - found_in_bronze
-    for missing_key in sorted(missing_from_bronze):
-        print(f"[ERRO] file_id={missing_key} esperado mas não encontrado no bucket Bronze")
-        _log_error(missing_key, "transform",
-                   "Ficheiro esperado não encontrado no bucket Bronze")
-        err_count += 1
-
+    file_ids = [r[0] for r in rows]
+    cur.execute(
+        "UPDATE op_data SET pipeline_status = 'PROCESSING' WHERE file_id = ANY(%s)",
+        (file_ids,)
+    )
     conn.commit()
+
+    ok_count  = 0
+    err_count = 0
+
+    for file_id, extract_function, report_id, created_at in rows:
+        key = str(file_id)
+
+        if not extract_function or extract_function not in EXTRACT_FUNCTIONS:
+            err_msg = f"extract_function inválida ou desconhecida: '{extract_function}'"
+            cur.execute(
+                "UPDATE op_data SET pipeline_status = 'FAILED', pipeline_error = %s WHERE file_id = %s",
+                (err_msg, file_id)
+            )
+            _log_error(cur, conn, file_id, "transform", err_msg)
+            conn.commit()
+            print(f"[ERRO] file_id={file_id}: {err_msg}")
+            err_count += 1
+            continue
+
+        print(f"A transformar: {key} ({extract_function})")
+
+        try:
+            data = read_raw_object(s3, key)
+            df   = EXTRACT_FUNCTIONS[extract_function](data)
+
+            if df is None or df.empty:
+                raise ValueError("DataFrame vazio após transformação")
+
+            df = clean_dataframe(df)
+
+            if df is None or df.empty:
+                raise ValueError("DataFrame vazio após clean_dataframe")
+
+            buffer = io.BytesIO()
+            df.to_parquet(buffer, index=False)
+            parquet_bytes = buffer.getvalue()
+
+            if not parquet_bytes:
+                raise ValueError("Parquet gerado está vazio (0 bytes)")
+
+            created_str = created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at)
+
+            s3.put_object(
+                Bucket=BUCKET_SILVER,
+                Key=f"{key}.parquet",
+                Body=parquet_bytes,
+                Metadata={
+                    "report_id":  str(report_id) if report_id is not None else "",
+                    "created_at": created_str,
+                },
+            )
+
+            cur.execute(
+                "UPDATE op_data SET pipeline_status = 'SILVER_OK' WHERE file_id = %s",
+                (file_id,)
+            )
+            conn.commit()
+            print(f"[OK]   {key} -> {key}.parquet")
+            ok_count += 1
+
+        except Exception as e:
+            err_msg = str(e)
+            cur.execute(
+                "UPDATE op_data SET pipeline_status = 'FAILED', pipeline_error = %s WHERE file_id = %s",
+                (err_msg, file_id)
+            )
+            _log_error(cur, conn, file_id, "transform", err_msg)
+            conn.commit()
+            print(f"[ERRO] {key}: {e}")
+            err_count += 1
+
     cur.close()
     conn.close()
     print(f"transform concluído — {ok_count} OK, {err_count} erros")
